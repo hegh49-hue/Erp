@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>هشامكو — نظام إدارة الأعمال المتكامل</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-box">
+    <h1>هشامكو</h1>
+    <div class="sub">نظام إدارة الأعمال المتكامل</div>
+    <div class="login-error" id="loginError"></div>
+    <div class="field"><label>البريد الإلكتروني</label><input id="loginEmail" type="email" autocomplete="username"></div>
+    <div class="field"><label>كلمة المرور</label><input id="loginPassword" type="password" autocomplete="current-password"></div>
+    <button class="btn btn-blue" id="loginBtn" style="width:100%;">دخول</button>
+  </div>
+</div>
+
+<!-- APP SHELL -->
+<div id="appShell" style="display:none; flex-direction:column; height:100vh; overflow:hidden;">
+<header>
+  <div class="brand">
+    <div class="brand-mark" id="hdrLogoWrap">م</div>
+    <div>
+      <div class="brand-name" id="hdrCompanyName">منشأتي</div>
+      <div class="brand-sub">لوحة تطبيقات إدارية • هيكل مستقل ومترابط</div>
+    </div>
+  </div>
+  <nav id="appNav">
+    <button class="active" data-app="home">🏠 الرئيسية</button>
+    <button data-app="accounting">المحاسبة</button>
+    <button data-app="pos">نقاط البيع</button>
+    <button data-app="inventory">المخزون</button>
+    <button data-app="settings">الإعدادات</button>
+  </nav>
+  <div class="header-right">
+    <span class="brand-sub" id="hdrUserName"></span>
+    <button class="logout-btn" id="logoutBtn">خروج</button>
+  </div>
+</header>
+
+<div class="subnav" id="accountingSubnav" style="display:none;">
+  <button class="active" data-view="accounts">شجرة الحسابات</button>
+  <button data-view="journal">القيود اليومية</button>
+  <button data-view="subledger">العناصر التحليلية</button>
+  <button data-view="ledger">دفتر الأستاذ</button>
+  <button data-view="trial">ميزان المراجعة</button>
+  <button data-view="statements">القوائم المالية</button>
+</div>
+<div class="subnav" id="inventorySubnav" style="display:none;">
+  <button class="active" data-invview="warehouses">المستودعات</button>
+  <button data-invview="items">الأصناف والأرصدة</button>
+  <button data-invview="transfers">التحويلات</button>
+  <button data-invview="counts">الجرد</button>
+  <button data-invview="bom">وصفات التصنيع (BOM)</button>
+</div>
+<div class="subnav" id="posSubnav" style="display:none;">
+  <button class="active" data-possub="sell">نقطة البيع</button>
+  <button data-possub="invoices">سجل الفواتير</button>
+</div>
+
+<main>
+  <!-- HOME -->
+  <div class="view active" id="view-home">
+    <div class="panel-header"><h2>لوحة التطبيقات</h2></div>
+    <div class="app-grid">
+      <div class="app-card" data-open-app="accounting">
+        <div class="app-icon" style="background:var(--blue-soft); color:var(--blue);">📊</div>
+        <div class="app-name">المحاسبة</div>
+        <div class="app-desc">شجرة الحسابات، القيود، دفتر الأستاذ، ميزان المراجعة، القوائم المالية</div>
+        <span class="app-status status-ready">جاهز للاستخدام</span>
+      </div>
+      <div class="app-card" data-open-app="pos">
+        <div class="app-icon" style="background:var(--stamp-soft); color:var(--stamp);">🧾</div>
+        <div class="app-name">نقاط البيع</div>
+        <div class="app-desc">بيع مباشر، فوترة QR، وقيد محاسبي تلقائي (إيراد + تكلفة بضاعة) لكل عملية بيع</div>
+        <span class="app-status status-ready">جاهز للاستخدام</span>
+      </div>
+      <div class="app-card" data-open-app="inventory">
+        <div class="app-icon" style="background:#E4F0E7; color:var(--green);">📦</div>
+        <div class="app-name">المخزون</div>
+        <div class="app-desc">مستودعات متعددة، تحويل بينها، جرد، وصفات تصنيع (BOM)</div>
+        <span class="app-status status-ready">جاهز للاستخدام</span>
+      </div>
+      <div class="app-card" data-open-app="settings">
+        <div class="app-icon" style="background:var(--panel); color:var(--ink);">⚙️</div>
+        <div class="app-name">الإعدادات</div>
+        <div class="app-desc">بيانات المنشأة، القنوات الخارجية</div>
+        <span class="app-status status-ready">جاهز للاستخدام</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCOUNTING -->
+  <div class="view" id="view-accounting" style="padding:0;">
+    <div class="subview active" id="view-accounts" style="padding:22px 26px;">
+      <div class="panel-header"><h2>شجرة الحسابات</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field"><label>رقم الحساب</label><input id="accCode" placeholder="مثال: 1000"></div>
+          <div class="field" style="flex:2;"><label>اسم الحساب</label><input id="accName" placeholder="مثال: النقدية"></div>
+          <div class="field"><label>نوع الحساب</label>
+            <select id="accType">
+              <option value="asset">أصول</option><option value="liability">التزامات</option>
+              <option value="equity">حقوق ملكية</option><option value="revenue">إيرادات</option><option value="expense">مصروفات</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row" style="align-items:center;">
+          <div class="field" style="flex:0 0 auto; display:flex; align-items:center; gap:8px; margin-bottom:0;">
+            <input type="checkbox" id="accHasSub" style="width:auto;">
+            <label style="margin-bottom:0;">حساب إجمالي له عناصر تحليلية فرعية</label>
+          </div>
+          <div class="field" id="accSubTypeWrap" style="display:none;">
+            <label>نوع العنصر التحليلي</label>
+            <select id="accSubType">
+              <option value="customer">عملاء</option><option value="supplier">موردين</option>
+              <option value="warehouse">مخازن</option><option value="cashbox">صناديق</option>
+              <option value="asset">أصول ثابتة</option><option value="employee">موظفين</option><option value="channel">قنوات خارجية</option>
+            </select>
+          </div>
+        </div>
+        <div class="field"><label>تصنيف قائمة التدفقات النقدية</label>
+          <select id="accCashFlow">
+            <option value="operating">تشغيلية</option><option value="investing">استثمارية</option>
+            <option value="financing">تمويلية</option><option value="excluded">مستبعد</option>
+          </select>
+        </div>
+        <button class="btn btn-blue" id="addAccountBtn">إضافة حساب</button>
+      </div>
+      <table id="accountsTable">
+        <thead><tr><th>الرقم</th><th>اسم الحساب</th><th>النوع</th><th>تحليل فرعي</th><th>الرصيد الحالي</th><th></th></tr></thead>
+        <tbody id="accountsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="subview" id="view-journal" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>القيود اليومية</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field"><label>التاريخ</label><input type="date" id="jeDate"></div>
+          <div class="field" style="flex:2;"><label>بيان القيد</label><input id="jeDesc" placeholder="وصف مختصر للعملية"></div>
+          <div class="field"><label>مرجع (اختياري)</label><input id="jeRef" placeholder="رقم فاتورة/مستند"></div>
+        </div>
+        <div id="linesContainer"></div>
+        <button class="btn btn-outline btn-sm" id="addLineBtn" style="margin-top:6px;">+ إضافة سطر</button>
+        <div class="lines-total">
+          <span>الإجمالي — مدين: <span class="mono" id="jeSumDebit">0.00</span> | دائن: <span class="mono" id="jeSumCredit">0.00</span></span>
+          <span id="jeBalanceFlag" class="balance-bad">غير متوازن</span>
+        </div>
+        <button class="btn btn-blue" id="saveEntryBtn" style="margin-top:12px; width:100%;" disabled>حفظ القيد</button>
+      </div>
+      <h3 style="font-size:14px; margin:20px 0 10px 0;">القيود المسجّلة</h3>
+      <div id="entriesList"></div>
+    </div>
+
+    <div class="subview" id="view-subledger" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>العناصر التحليلية (الدفاتر المساعدة)</h2></div>
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0; flex:2; min-width:220px;"><label>الحساب الإجمالي</label><select id="subAccSelect"></select></div>
+      </div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field"><label>رمز العنصر</label><input id="subEntCode" placeholder="مثال: C001"></div>
+          <div class="field" style="flex:2;"><label>اسم العنصر</label><input id="subEntName" placeholder="مثال: مطعم لمار - عميل"></div>
+        </div>
+        <button class="btn btn-outline" id="addSubEntityBtn">إضافة عنصر تحليلي</button>
+      </div>
+      <div id="subledgerOutput"></div>
+    </div>
+
+    <div class="subview" id="view-ledger" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>دفتر الأستاذ</h2></div>
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0; flex:2; min-width:220px;"><label>الحساب</label><select id="ledgerAccSelect"></select></div>
+        <div class="field" style="margin-bottom:0;"><label>من تاريخ</label><input type="date" id="ledgerFrom"></div>
+        <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="ledgerTo"></div>
+      </div>
+      <div id="ledgerOutput"></div>
+    </div>
+
+    <div class="subview" id="view-trial" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>ميزان المراجعة</h2></div>
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>حتى تاريخ</label><input type="date" id="trialAsOf"></div>
+      </div>
+      <div id="trialOutput"></div>
+    </div>
+
+    <div class="subview" id="view-statements" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>القوائم المالية</h2></div>
+      <div class="subtabs">
+        <button class="subtab-btn active" data-fs="income">قائمة الدخل</button>
+        <button class="subtab-btn" data-fs="balance">المركز المالي</button>
+        <button class="subtab-btn" data-fs="cashflow">التدفقات النقدية</button>
+        <button class="subtab-btn" data-fs="equity">التغيرات في حقوق الملكية</button>
+      </div>
+      <div id="fsIncomeFilters" class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>من تاريخ</label><input type="date" id="incFrom"></div>
+        <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="incTo"></div>
+      </div>
+      <div id="fsBalanceFilters" class="form-card" style="display:none; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>كما في تاريخ</label><input type="date" id="balAsOf"></div>
+      </div>
+      <div id="fsCashflowFilters" class="form-card" style="display:none; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>من تاريخ</label><input type="date" id="cfFrom"></div>
+        <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="cfTo"></div>
+      </div>
+      <div id="fsEquityFilters" class="form-card" style="display:none; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>من تاريخ</label><input type="date" id="eqFrom"></div>
+        <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="eqTo"></div>
+      </div>
+      <div id="fsOutput"></div>
+    </div>
+  </div><!-- /view-accounting -->
+
+  <!-- INVENTORY -->
+  <div class="view" id="view-inventory" style="padding:0;">
+    <div class="subview active" id="inv-warehouses" style="padding:22px 26px;">
+      <div class="panel-header"><h2>المستودعات</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field" style="flex:2;"><label>اسم المستودع</label><input id="whName" placeholder="مثال: مستودع الفرع الرئيسي"></div>
+        </div>
+        <button class="btn btn-blue" id="addWarehouseBtn">إضافة مستودع</button>
+      </div>
+      <div class="wh-grid" id="warehousesGrid"></div>
+    </div>
+
+    <div class="subview" id="inv-items" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>الأصناف والأرصدة</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field" style="flex:2;"><label>اسم الصنف</label><input id="itName" placeholder="مثال: دقيق"></div>
+          <div class="field"><label>النوع</label>
+            <select id="itType">
+              <option value="raw">خام</option><option value="semi_finished">نصف مصنّع</option>
+              <option value="finished">تام</option><option value="packaging">تعبئة</option><option value="consumable">مستهلكات</option>
+            </select>
+          </div>
+          <div class="field"><label>وحدة القياس</label><input id="itUnit" placeholder="كجم / قطعة / لتر" value="قطعة"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>سعر البيع (شامل الضريبة)</label><input id="itPrice" type="number" step="0.01" placeholder="0.00"></div>
+          <div class="field"><label>خاضع للضريبة؟</label><select id="itTaxable"><option value="yes">نعم — 15%</option><option value="no">لا</option></select></div>
+          <div class="field"><label>يُباع في نقاط البيع؟</label><select id="itSellable"><option value="yes">نعم</option><option value="no">لا (مادة خام)</option></select></div>
+        </div>
+        <button class="btn btn-blue" id="addItemBtn">إضافة صنف</button>
+      </div>
+      <table id="itemsTable">
+        <thead><tr><th>الصنف</th><th>النوع</th><th>الوحدة</th><th>السعر</th><th>الرصيد الإجمالي</th><th>حسب المستودع</th></tr></thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+
+      <h3 style="font-size:14px; margin:22px 0 10px 0;">استلام / تسوية مخزون يدوية</h3>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field"><label>الصنف</label><select id="rcvItem"></select></div>
+          <div class="field"><label>المستودع</label><select id="rcvWarehouse"></select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>الحركة</label><select id="rcvMode"><option value="receive">استلام (رصيد افتتاحي / استلام يدوي)</option><option value="adjust">تسوية (+/-)</option></select></div>
+          <div class="field"><label>الكمية</label><input id="rcvQty" type="number" step="0.0001" placeholder="0"></div>
+          <div class="field" id="rcvCostWrap"><label>تكلفة الوحدة</label><input id="rcvCost" type="number" step="0.0001" placeholder="0.00"></div>
+        </div>
+        <div class="field"><label>ملاحظة</label><input id="rcvNote" placeholder="اختياري"></div>
+        <button class="btn btn-outline" id="rcvSubmitBtn">تنفيذ</button>
+        <div id="rcvMsg" class="msg" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="subview" id="inv-transfers" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>التحويلات بين المستودعات</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field"><label>من مستودع</label><select id="trFrom"></select></div>
+          <div class="field"><label>إلى مستودع</label><select id="trTo"></select></div>
+          <div class="field"><label>التاريخ</label><input type="date" id="trDate"></div>
+        </div>
+        <div id="trLinesContainer"></div>
+        <button class="btn btn-outline btn-sm" id="trAddLineBtn" style="margin-top:6px;">+ إضافة صنف</button>
+        <div class="field" style="margin-top:10px;"><label>ملاحظة</label><input id="trNote" placeholder="اختياري"></div>
+        <button class="btn btn-blue" id="trSubmitBtn" style="width:100%; margin-top:10px;">تنفيذ التحويل</button>
+        <div id="trMsg" class="msg" style="display:none;"></div>
+      </div>
+      <h3 style="font-size:14px; margin:20px 0 10px 0;">سجل التحويلات</h3>
+      <div id="transfersList"></div>
+    </div>
+
+    <div class="subview" id="inv-counts" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>الجرد الفعلي</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field"><label>المستودع</label><select id="cntWarehouse"></select></div>
+          <div class="field"><label>التاريخ</label><input type="date" id="cntDate"></div>
+        </div>
+        <button class="btn btn-blue" id="cntCreateBtn">بدء جرد جديد</button>
+      </div>
+      <div id="countsList"></div>
+    </div>
+
+    <div class="subview" id="inv-bom" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>وصفات التصنيع (BOM)</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field" style="flex:2;"><label>الصنف الناتج</label><select id="bomOutputItem"></select></div>
+          <div class="field"><label>اسم الوصفة</label><input id="bomName" placeholder="مثال: وصفة قياسية"></div>
+          <div class="field"><label>كمية الإنتاج للوصفة</label><input id="bomOutputQty" type="number" step="0.0001" value="1"></div>
+        </div>
+        <div id="bomLinesContainer"></div>
+        <button class="btn btn-outline btn-sm" id="bomAddLineBtn" style="margin-top:6px;">+ إضافة مكوّن</button>
+        <button class="btn btn-blue" id="bomSubmitBtn" style="width:100%; margin-top:10px;">حفظ الوصفة</button>
+        <div id="bomMsg" class="msg" style="display:none;"></div>
+      </div>
+      <h3 style="font-size:14px; margin:20px 0 10px 0;">الوصفات المعرّفة</h3>
+      <div id="bomsList"></div>
+    </div>
+  </div><!-- /view-inventory -->
+
+  <!-- POS -->
+  <div class="view" id="view-pos" style="padding:0;">
+    <div class="possub active" id="pos-sell" style="display:flex; height:calc(100vh - 130px); overflow:hidden;">
+      <div style="width:340px; flex-shrink:0; background:#fff; border-left:1px solid var(--line); display:flex; flex-direction:column;">
+        <div style="padding:14px 16px; border-bottom:1px solid var(--line);">
+          <div class="field" style="margin-bottom:8px;"><label>الكاشير</label><select id="posCashierSelect"></select></div>
+          <div class="field" style="margin-bottom:8px;"><label>المستودع</label><select id="posWarehouseSelect"></select></div>
+          <div class="field-row" style="margin-bottom:0;">
+            <div class="field" style="margin-bottom:0;"><label>نوع الطلب</label><select id="posOrderType"><option value="محلي">محلي</option><option value="توصيل">توصيل</option></select></div>
+            <div class="field" style="margin-bottom:0;"><label>الدفع / القناة</label><select id="posPayMethod"></select></div>
+          </div>
+          <div class="field" style="margin-bottom:0; margin-top:8px;"><label>مصدر الطلب</label>
+            <select id="posOrderSource">
+              <option value="محلي">محلي (زبون داخل)</option><option value="واتساب">واتساب بزنس</option>
+              <option value="انستقرام">إنستقرام</option><option value="سناب شات">سناب شات</option><option value="تطبيق توصيل">تطبيق توصيل خارجي</option>
+            </select>
+          </div>
+        </div>
+        <div id="posCartList" style="flex:1; overflow-y:auto; padding:8px 14px;"></div>
+        <div style="padding:14px 16px; border-top:1px solid var(--line); background:var(--panel);">
+          <div class="fs-row"><span>قبل الضريبة</span><span class="mono" id="posSub">0.00</span></div>
+          <div class="fs-row"><span>ضريبة القيمة المضافة 15%</span><span class="mono" id="posVat">0.00</span></div>
+          <div class="fs-row grand"><span>الإجمالي</span><span class="mono" id="posTotal">0.00</span></div>
+          <button class="btn btn-primary" id="posCheckoutBtn" style="width:100%; margin-top:10px;" disabled>إصدار الفاتورة</button>
+          <button class="btn btn-outline" id="posClearCartBtn" style="width:100%; margin-top:8px;">تفريغ السلة</button>
+        </div>
+      </div>
+      <div style="flex:1; overflow-y:auto; padding:16px;">
+        <div id="posItemsGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px;"></div>
+      </div>
+    </div>
+    <div class="possub" id="pos-invoices" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>سجل فواتير نقاط البيع</h2><span class="mono" id="posInvSummary" style="color:var(--muted); font-size:12.5px;"></span></div>
+      <table id="posInvTable">
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الكاشير</th><th>المستودع</th><th>الدفع</th><th>الإجمالي</th><th></th></tr></thead>
+        <tbody id="posInvBody"></tbody>
+      </table>
+    </div>
+  </div><!-- /view-pos -->
+
+  <!-- SETTINGS -->
+  <div class="view" id="view-settings">
+    <div class="panel-header"><h2>إعدادات المنشأة</h2></div>
+    <div class="form-card" style="max-width:480px;">
+      <div class="field"><label>اسم المنشأة</label><input id="setCompanyName" placeholder="اسم المنشأة"></div>
+      <div class="field-row">
+        <div class="field"><label>الرقم الضريبي (15 رقم)</label><input id="setVatNumber" maxlength="15" placeholder="3xxxxxxxxxxxxx3"></div>
+        <div class="field"><label>الجوال</label><input id="setPhone" placeholder="05xxxxxxxx"></div>
+      </div>
+      <div class="field"><label>العنوان</label><input id="setAddress" placeholder="المدينة، الحي، الشارع"></div>
+      <button class="btn btn-blue" id="saveCompanyBtn" style="width:100%;">حفظ</button>
+      <div id="settingsMsg" class="msg ok" style="display:none;">✓ تم الحفظ</div>
+    </div>
+
+    <div class="form-card" style="max-width:640px;">
+      <label style="display:block; font-size:13px; font-weight:800; margin-bottom:4px;">القنوات الخارجية (توصيل / دفع آجل / بوابات دفع)</label>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:14px; line-height:1.7;">أضف أي تطبيق توصيل أو خدمة دفع آجل أو بوابة دفع إلكتروني — يظهر تلقائياً كخيار دفع في نقاط البيع.</div>
+      <div class="field-row">
+        <div class="field"><label>اسم القناة</label><input id="chName" placeholder="مثال: جاهز، تابي، تمارا"></div>
+        <div class="field"><label>النوع</label>
+          <select id="chType"><option value="توصيل خارجي">توصيل خارجي</option><option value="دفع آجل">دفع آجل</option><option value="بوابة دفع">بوابة دفع</option><option value="أخرى">أخرى</option></select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>نسبة العمولة %</label><input id="chCommission" type="number" step="0.1" placeholder="مثال: 25"></div>
+        <div class="field"><label>دورة التسوية</label>
+          <select id="chCycle"><option value="فوري">فوري</option><option value="يومي">يومي</option><option value="أسبوعي">أسبوعي</option><option value="15 يوم">كل 15 يوم</option></select>
+        </div>
+      </div>
+      <button class="btn btn-outline" id="addChannelBtn">إضافة قناة</button>
+      <table id="channelsTable" style="margin-top:16px;">
+        <thead><tr><th>القناة</th><th>النوع</th><th>العمولة</th><th>الدورة</th><th>المستحق حالياً</th><th></th></tr></thead>
+        <tbody id="channelsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- POS RECEIPT MODAL -->
+<div class="modal-overlay" id="posReceiptOverlay">
+  <div class="modal-box">
+    <div class="modal-close-bar"><button id="posCloseReceiptBtn">✕</button></div>
+    <div class="receipt" id="posReceiptContent"></div>
+    <div class="receipt-actions">
+      <button style="background:var(--ink); color:#fff;" id="posPrintBtn">طباعة</button>
+      <button style="background:var(--panel); color:var(--ink);" id="posNewSaleBtn">طلب جديد</button>
+    </div>
+  </div>
+</div>
+
+<!-- STOCK COUNT MODAL -->
+<div class="modal-overlay" id="countModalOverlay">
+  <div class="modal-box wide">
+    <div class="modal-close-bar"><button id="countModalCloseBtn">✕</button></div>
+    <div id="countModalContent" style="padding:0 20px 20px 20px;"></div>
+  </div>
+</div>
+
+</div><!-- /appShell -->
+
+<script src="js/api.js"></script>
+<script src="js/accounting.js"></script>
+<script src="js/inventory.js"></script>
+<script src="js/pos.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

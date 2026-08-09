@@ -1,0 +1,130 @@
+let currentUser = null;
+
+function showLogin() {
+  document.getElementById('loginWrap').style.display = 'flex';
+  document.getElementById('appShell').style.display = 'none';
+}
+function showApp() {
+  document.getElementById('loginWrap').style.display = 'none';
+  document.getElementById('appShell').style.display = 'flex';
+}
+
+async function tryResumeSession() {
+  if (!Api.token) { showLogin(); return; }
+  try {
+    const { user } = await Api.get('/auth/me');
+    currentUser = user;
+    document.getElementById('hdrUserName').textContent = user.fullName;
+    showApp();
+    await loadCompanyHeader();
+    openApp('home');
+  } catch (err) {
+    showLogin();
+  }
+}
+
+document.getElementById('loginBtn').onclick = async () => {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  try {
+    const { token, user } = await Api.post('/auth/login', { email, password });
+    Api.setToken(token);
+    currentUser = user;
+    document.getElementById('hdrUserName').textContent = user.fullName;
+    showApp();
+    await loadCompanyHeader();
+    openApp('home');
+  } catch (err) {
+    errEl.textContent = err.message;
+  }
+};
+document.getElementById('loginPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('loginBtn').click(); });
+
+document.getElementById('logoutBtn').onclick = () => { Api.setToken(null); currentUser = null; showLogin(); };
+
+async function loadCompanyHeader() {
+  try {
+    const company = await Api.get('/settings/company');
+    document.getElementById('hdrCompanyName').textContent = company?.name || 'منشأتي';
+  } catch (err) { /* ignore */ }
+}
+
+// ---------- App / subnav navigation ----------
+function openApp(appKey) {
+  document.querySelectorAll('#appNav button').forEach((b) => b.classList.toggle('active', b.dataset.app === appKey));
+  document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+  document.getElementById('view-' + appKey).classList.add('active');
+  document.getElementById('accountingSubnav').style.display = appKey === 'accounting' ? 'flex' : 'none';
+  document.getElementById('inventorySubnav').style.display = appKey === 'inventory' ? 'flex' : 'none';
+  document.getElementById('posSubnav').style.display = appKey === 'pos' ? 'flex' : 'none';
+
+  if (appKey === 'accounting') {
+    const activeSub = document.querySelector('#view-accounting .subview.active');
+    openAccountingSub(activeSub ? activeSub.id.replace('view-', '') : 'accounts');
+  } else if (appKey === 'inventory') {
+    const activeSub = document.querySelector('#view-inventory .subview.active');
+    openInventorySub(activeSub ? activeSub.id.replace('inv-', '') : 'warehouses');
+  } else if (appKey === 'pos') {
+    const activeSub = document.querySelector('#view-pos .possub.active');
+    openPosSub(activeSub ? activeSub.id.replace('pos-', '') : 'sell');
+  } else if (appKey === 'settings') {
+    renderSettings();
+  }
+}
+document.querySelectorAll('#appNav button').forEach((btn) => btn.addEventListener('click', () => openApp(btn.dataset.app)));
+document.querySelectorAll('.app-card').forEach((card) => card.addEventListener('click', () => openApp(card.dataset.openApp)));
+
+function openAccountingSub(subKey) {
+  document.querySelectorAll('#accountingSubnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === subKey));
+  document.querySelectorAll('#view-accounting .subview').forEach((v) => { v.classList.remove('active'); v.style.display = 'none'; });
+  const el = document.getElementById('view-' + subKey);
+  el.classList.add('active'); el.style.display = 'block';
+  if (subKey === 'accounts') renderAccountsTable();
+  if (subKey === 'journal') { resetJournalFormIfNeeded(); renderEntriesList(); }
+  if (subKey === 'subledger') { populateSubAccSelect(); }
+  if (subKey === 'ledger') { populateLedgerAccounts(); }
+  if (subKey === 'trial') renderTrialBalance();
+  if (subKey === 'statements') renderStatements();
+}
+document.querySelectorAll('#accountingSubnav button').forEach((btn) => btn.addEventListener('click', () => openAccountingSub(btn.dataset.view)));
+
+function openInventorySub(subKey) {
+  document.querySelectorAll('#inventorySubnav button').forEach((b) => b.classList.toggle('active', b.dataset.invview === subKey));
+  document.querySelectorAll('#view-inventory .subview').forEach((v) => { v.classList.remove('active'); v.style.display = 'none'; });
+  const el = document.getElementById('inv-' + subKey);
+  el.classList.add('active'); el.style.display = 'block';
+  if (subKey === 'warehouses') renderWarehouses();
+  if (subKey === 'items') renderInventoryItems();
+  if (subKey === 'transfers') renderTransfers();
+  if (subKey === 'counts') renderCounts();
+  if (subKey === 'bom') renderBoms();
+}
+document.querySelectorAll('#inventorySubnav button').forEach((btn) => btn.addEventListener('click', () => openInventorySub(btn.dataset.invview)));
+
+function openPosSub(subKey) {
+  document.querySelectorAll('#posSubnav button').forEach((b) => b.classList.toggle('active', b.dataset.possub === subKey));
+  document.querySelectorAll('#view-pos .possub').forEach((v) => { v.style.display = 'none'; v.classList.remove('active'); });
+  const el = document.getElementById('pos-' + subKey);
+  el.style.display = subKey === 'sell' ? 'flex' : 'block';
+  el.classList.add('active');
+  if (subKey === 'sell') initPosSell();
+  if (subKey === 'invoices') renderPosInvoices();
+}
+document.querySelectorAll('#posSubnav button').forEach((btn) => btn.addEventListener('click', () => openPosSub(btn.dataset.possub)));
+
+document.querySelectorAll('.subtab-btn').forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll('.subtab-btn').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active');
+    activeFs = b.dataset.fs;
+    document.getElementById('fsIncomeFilters').style.display = activeFs === 'income' ? 'flex' : 'none';
+    document.getElementById('fsBalanceFilters').style.display = activeFs === 'balance' ? 'flex' : 'none';
+    document.getElementById('fsCashflowFilters').style.display = activeFs === 'cashflow' ? 'flex' : 'none';
+    document.getElementById('fsEquityFilters').style.display = activeFs === 'equity' ? 'flex' : 'none';
+    renderStatements();
+  };
+});
+
+tryResumeSession();
