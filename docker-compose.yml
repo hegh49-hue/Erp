@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: erp
+      POSTGRES_USER: erp_app
+      POSTGRES_PASSWORD: erp_app_pw
+    volumes:
+      - erp_db_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgres://erp_app:erp_app_pw@db:5432/erp
+      JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-before-real-use}
+      PORT: 4000
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-ChangeMe123!}
+
+volumes:
+  erp_db_data:
