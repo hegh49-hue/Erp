@@ -239,7 +239,16 @@
       <div class="form-card">
         <div class="field-row">
           <div class="field" style="flex:2;"><label>اسم الصنف</label><input id="itName" placeholder="مثال: دقيق"></div>
-          <div class="field"><label>النوع</label>
+          <div class="field"><label>طبيعة الصنف</label>
+            <select id="itNature">
+              <option value="goods">سلعي (له مخزون)</option>
+              <option value="service">خدمي (بدون مخزون)</option>
+            </select>
+          </div>
+          <div class="field"><label>التصنيف / المجموعة</label><input id="itCategory" placeholder="مثال: أطباق رئيسية، مشروبات"></div>
+        </div>
+        <div class="field-row">
+          <div class="field" id="itTypeWrap"><label>نوع الصنف الفرعي</label>
             <select id="itType">
               <option value="raw">خام</option><option value="semi_finished">نصف مصنّع</option>
               <option value="finished">تام</option><option value="packaging">تعبئة</option><option value="consumable">مستهلكات</option>
@@ -255,7 +264,7 @@
         <button class="btn btn-blue" id="addItemBtn">إضافة صنف</button>
       </div>
       <table id="itemsTable">
-        <thead><tr><th>الصنف</th><th>النوع</th><th>الوحدة</th><th>السعر</th><th>الرصيد الإجمالي</th><th>حسب المستودع</th></tr></thead>
+        <thead><tr><th>الصنف</th><th>الطبيعة</th><th>التصنيف</th><th>الوحدة</th><th>السعر</th><th>الرصيد الإجمالي</th><th>حسب المستودع</th></tr></thead>
         <tbody id="itemsBody"></tbody>
       </table>
 
@@ -330,7 +339,7 @@
       <div style="width:340px; flex-shrink:0; background:#fff; border-left:1px solid var(--line); display:flex; flex-direction:column;">
         <div style="padding:14px 16px; border-bottom:1px solid var(--line);">
           <div class="field" style="margin-bottom:8px;"><label>الكاشير</label><select id="posCashierSelect"></select></div>
-          <div class="field" style="margin-bottom:8px;"><label>المستودع</label><select id="posWarehouseSelect"></select></div>
+          <div class="field" style="margin-bottom:8px;"><label>المستودع (غير مطلوب إن كانت السلة خدمية بالكامل)</label><select id="posWarehouseSelect"></select></div>
           <div class="field-row" style="margin-bottom:0;">
             <div class="field" style="margin-bottom:0;"><label>نوع الطلب</label><select id="posOrderType"><option value="محلي">محلي</option><option value="توصيل">توصيل</option></select></div>
             <div class="field" style="margin-bottom:0;"><label>الدفع / القناة</label><select id="posPayMethod"></select></div>
@@ -352,6 +361,7 @@
         </div>
       </div>
       <div style="flex:1; overflow-y:auto; padding:16px;">
+        <div id="posCatTabs" style="padding:0 0 14px 0; display:flex; gap:8px; flex-wrap:wrap;"></div>
         <div id="posItemsGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px;"></div>
       </div>
     </div>
@@ -368,6 +378,13 @@
   <div class="view" id="view-settings">
     <div class="panel-header"><h2>إعدادات المنشأة</h2></div>
     <div class="form-card" style="max-width:480px;">
+      <div class="field">
+        <label>شعار المنشأة</label>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div id="logoPreviewSlot"><div style="width:56px;height:56px;border-radius:10px;border:1px dashed var(--line); display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:10px; text-align:center;">لا يوجد</div></div>
+          <label class="file-btn">اختيار صورة<input type="file" id="logoInput" accept="image/*"></label>
+        </div>
+      </div>
       <div class="field"><label>اسم المنشأة</label><input id="setCompanyName" placeholder="اسم المنشأة"></div>
       <div class="field-row">
         <div class="field"><label>الرقم الضريبي (15 رقم)</label><input id="setVatNumber" maxlength="15" placeholder="3xxxxxxxxxxxxx3"></div>

@@ -6,6 +6,7 @@ async function initPosSell() {
   await populateCashierSelect();
   populatePosWarehouseSelect();
   populatePosPayMethod();
+  renderPosCategories();
   renderPosItemsGrid();
   renderPosCart();
 }
@@ -44,15 +45,31 @@ function populatePosPayMethod() {
   if (cur) sel.value = cur;
 }
 
+let posActiveCat = 'الكل';
+function renderPosCategories() {
+  const sellable = cachedItems.filter((i) => i.is_sellable);
+  const cats = ['الكل', ...new Set(sellable.map((i) => i.category || 'عام'))];
+  const wrap = document.getElementById('posCatTabs');
+  wrap.innerHTML = '';
+  if (!cats.includes(posActiveCat)) posActiveCat = 'الكل';
+  cats.forEach((c) => {
+    const b = document.createElement('button');
+    b.className = 'subtab-btn' + (c === posActiveCat ? ' active' : '');
+    b.textContent = c;
+    b.onclick = () => { posActiveCat = c; renderPosCategories(); renderPosItemsGrid(); };
+    wrap.appendChild(b);
+  });
+}
 function renderPosItemsGrid() {
   const grid = document.getElementById('posItemsGrid');
   grid.innerHTML = '';
-  const list = cachedItems.filter((i) => i.is_sellable);
-  if (list.length === 0) { grid.innerHTML = '<div class="empty-note" style="grid-column:1/-1;">لا توجد أصناف قابلة للبيع — أضفها من المخزون</div>'; return; }
+  const list = cachedItems.filter((i) => i.is_sellable && (posActiveCat === 'الكل' || (i.category || 'عام') === posActiveCat));
+  if (list.length === 0) { grid.innerHTML = '<div class="empty-note" style="grid-column:1/-1;">لا توجد أصناف قابلة للبيع في هذا التصنيف</div>'; return; }
   list.forEach((item) => {
     const card = document.createElement('div');
     card.className = 'pos-item-card';
-    card.innerHTML = `<div class="pn">${escapeHtml(item.name)}</div><div class="pc">متوفر ${item.totalQty}</div><div class="pp">${money(item.price)}</div>`;
+    const availLine = item.is_stock_tracked ? `<div class="pc">متوفر ${item.totalQty}</div>` : `<div class="pc">خدمي</div>`;
+    card.innerHTML = `<div class="pn">${escapeHtml(item.name)}</div>${availLine}<div class="pp">${money(item.price)}</div>`;
     card.onclick = () => {
       if (item.is_stock_tracked && item.totalQty <= 0) { alert('الكمية غير متوفرة بالمخزون'); return; }
       addToPosCart(item);
@@ -105,8 +122,9 @@ function renderPosCart() {
 document.getElementById('posCheckoutBtn').onclick = async () => {
   const cashierId = document.getElementById('posCashierSelect').value;
   const warehouseId = document.getElementById('posWarehouseSelect').value;
+  const requiresWarehouse = posCart.some((c) => c.tracked);
   if (!cashierId || cashierId === '__new__') { alert('يرجى اختيار الكاشير أولاً'); return; }
-  if (!warehouseId) { alert('يرجى اختيار المستودع أولاً'); return; }
+  if (requiresWarehouse && !warehouseId) { alert('يرجى اختيار المستودع أولاً — السلة تحتوي أصنافاً سلعية'); return; }
   const payMethodRaw = document.getElementById('posPayMethod').value;
   const payMethodLabel = document.querySelector('#posPayMethod option:checked').textContent;
   const payMethod = payMethodRaw.startsWith('channel:') ? 'channel' : payMethodRaw;

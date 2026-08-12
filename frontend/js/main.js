@@ -46,8 +46,12 @@ document.getElementById('logoutBtn').onclick = () => { Api.setToken(null); curre
 
 async function loadCompanyHeader() {
   try {
-    const company = await Api.get('/settings/company');
-    document.getElementById('hdrCompanyName').textContent = company?.name || 'منشأتي';
+    companyCache = await Api.get('/settings/company');
+    document.getElementById('hdrCompanyName').textContent = companyCache?.name || 'منشأتي';
+    const wrap = document.getElementById('hdrLogoWrap');
+    wrap.innerHTML = companyCache?.logo
+      ? `<img src="${companyCache.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`
+      : 'م';
   } catch (err) { /* ignore */ }
 }
 

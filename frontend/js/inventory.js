@@ -40,9 +40,14 @@ async function renderWarehouses() {
 }
 
 // ---------- Items & stock ----------
-document.getElementById('itTaxable'); // noop reference to ensure element exists at load
+const ITEM_NATURE_LABELS = { goods: 'سلعي', service: 'خدمي' };
+document.getElementById('itNature').addEventListener('change', (e) => {
+  document.getElementById('itTypeWrap').style.display = e.target.value === 'service' ? 'none' : 'block';
+});
 document.getElementById('addItemBtn').onclick = async () => {
   const name = document.getElementById('itName').value.trim();
+  const nature = document.getElementById('itNature').value;
+  const category = document.getElementById('itCategory').value.trim() || 'عام';
   const itemType = document.getElementById('itType').value;
   const unit = document.getElementById('itUnit').value.trim() || 'قطعة';
   const price = parseFloat(document.getElementById('itPrice').value) || 0;
@@ -50,8 +55,8 @@ document.getElementById('addItemBtn').onclick = async () => {
   const isSellable = document.getElementById('itSellable').value === 'yes';
   if (!name) { alert('يرجى إدخال اسم الصنف'); return; }
   try {
-    await Api.post('/inventory/items', { name, itemType, unit, price, taxable, isSellable, isStockTracked: true });
-    document.getElementById('itName').value = ''; document.getElementById('itPrice').value = '';
+    await Api.post('/inventory/items', { name, nature, category, itemType, unit, price, taxable, isSellable, isStockTracked: nature !== 'service' });
+    document.getElementById('itName').value = ''; document.getElementById('itPrice').value = ''; document.getElementById('itCategory').value = '';
     renderInventoryItems();
   } catch (err) { alert(err.message); }
 };
@@ -60,13 +65,18 @@ async function renderInventoryItems() {
   body.innerHTML = '<tr><td colspan="6" class="empty-note">جارٍ التحميل...</td></tr>';
   await Promise.all([loadItems(), loadWarehouses()]);
   body.innerHTML = '';
-  if (cachedItems.length === 0) { body.innerHTML = '<tr><td colspan="6" class="empty-note">لا توجد أصناف بعد</td></tr>'; }
+  if (cachedItems.length === 0) { body.innerHTML = '<tr><td colspan="7" class="empty-note">لا توجد أصناف بعد</td></tr>'; }
   cachedItems.forEach((it) => {
-    const lowStock = it.reorder_point > 0 && it.totalQty <= Number(it.reorder_point);
-    const perWh = it.stock.map((s) => `<span class="stock-pill ${Number(s.qty) <= 0 ? 'low' : ''}">${escapeHtml(s.warehouse_code)}: ${Number(s.qty)}</span>`).join(' ') || '<span class="stock-pill">لا يوجد رصيد</span>';
+    const isService = it.nature === 'service';
+    const lowStock = !isService && it.reorder_point > 0 && it.totalQty <= Number(it.reorder_point);
+    const perWh = isService
+      ? '<span class="stock-pill">—</span>'
+      : (it.stock.map((s) => `<span class="stock-pill ${Number(s.qty) <= 0 ? 'low' : ''}">${escapeHtml(s.warehouse_code)}: ${Number(s.qty)}</span>`).join(' ') || '<span class="stock-pill">لا يوجد رصيد</span>');
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${escapeHtml(it.name)}</td><td>${ITEM_TYPE_LABELS[it.item_type]}</td><td>${escapeHtml(it.unit)}</td><td class="mono">${money(it.price)}</td>
-      <td class="mono" style="color:${lowStock ? 'var(--stamp)' : 'inherit'};">${it.totalQty}${lowStock ? ' ⚠' : ''}</td>
+    tr.innerHTML = `<td>${escapeHtml(it.name)}</td>
+      <td><span class="badge ${isService ? '' : 'warn'}" style="${isService ? '' : 'background:var(--blue-soft); color:var(--blue);'}">${ITEM_NATURE_LABELS[it.nature]}</span></td>
+      <td>${escapeHtml(it.category)}</td><td>${escapeHtml(it.unit)}</td><td class="mono">${money(it.price)}</td>
+      <td class="mono" style="color:${lowStock ? 'var(--stamp)' : 'inherit'};">${isService ? '—' : (it.totalQty + (lowStock ? ' ⚠' : ''))}</td>
       <td>${perWh}</td>`;
     body.appendChild(tr);
   });
@@ -283,7 +293,7 @@ document.getElementById('bomSubmitBtn').onclick = async () => {
 };
 async function renderBoms() {
   await loadItems();
-  document.getElementById('bomOutputItem').innerHTML = itemOptionsHtml(document.getElementById('bomOutputItem').value, false);
+  document.getElementById('bomOutputItem').innerHTML = itemOptionsHtml(document.getElementById('bomOutputItem').value, true);
   if (bomLines.length === 0) { bomLines = [bomNewLine()]; renderBomLines(); }
 
   const list = document.getElementById('bomsList');

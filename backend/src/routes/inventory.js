@@ -63,14 +63,16 @@ router.get('/items', asyncHandler(async (req, res) => {
 }));
 
 router.post('/items', asyncHandler(async (req, res) => {
-  const { sku, name, category, itemType, unit, price, taxable, isSellable, isStockTracked, reorderPoint } = req.body;
+  const { sku, name, category, nature, itemType, unit, price, taxable, isSellable, isStockTracked, reorderPoint } = req.body;
   if (!name) throw new ApiError(400, 'اسم الصنف مطلوب');
+  const finalNature = nature === 'service' ? 'service' : 'goods';
+  const finalStockTracked = finalNature === 'service' ? false : (isStockTracked !== false);
   try {
     const { rows } = await pool.query(
-      `INSERT INTO items (sku, name, category, item_type, unit, price, taxable, is_sellable, is_stock_tracked, reorder_point)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [sku || null, name, category || 'عام', itemType || 'finished', unit || 'قطعة', Number(price) || 0,
-        taxable !== false, isSellable !== false, isStockTracked !== false, Number(reorderPoint) || 0]
+      `INSERT INTO items (sku, name, category, nature, item_type, unit, price, taxable, is_sellable, is_stock_tracked, reorder_point)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [sku || null, name, category || 'عام', finalNature, itemType || 'finished', unit || 'قطعة', Number(price) || 0,
+        taxable !== false, isSellable !== false, finalStockTracked, Number(reorderPoint) || 0]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -81,11 +83,13 @@ router.post('/items', asyncHandler(async (req, res) => {
 
 router.put('/items/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { name, category, itemType, unit, price, taxable, isSellable, isStockTracked, reorderPoint } = req.body;
+  const { name, category, nature, itemType, unit, price, taxable, isSellable, isStockTracked, reorderPoint } = req.body;
+  const finalNature = nature === 'service' ? 'service' : 'goods';
+  const finalStockTracked = finalNature === 'service' ? false : !!isStockTracked;
   const { rows } = await pool.query(
-    `UPDATE items SET name=$1, category=$2, item_type=$3, unit=$4, price=$5, taxable=$6, is_sellable=$7, is_stock_tracked=$8, reorder_point=$9, updated_at=now()
-     WHERE id=$10 RETURNING *`,
-    [name, category, itemType, unit, Number(price) || 0, !!taxable, !!isSellable, !!isStockTracked, Number(reorderPoint) || 0, id]
+    `UPDATE items SET name=$1, category=$2, nature=$3, item_type=$4, unit=$5, price=$6, taxable=$7, is_sellable=$8, is_stock_tracked=$9, reorder_point=$10, updated_at=now()
+     WHERE id=$11 RETURNING *`,
+    [name, category, finalNature, itemType, unit, Number(price) || 0, !!taxable, !!isSellable, finalStockTracked, Number(reorderPoint) || 0, id]
   );
   if (!rows[0]) throw new ApiError(404, 'صنف غير موجود');
   res.json(rows[0]);
@@ -96,6 +100,9 @@ router.post('/items/:id/receive', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { warehouseId, qty, unitCost, date, note } = req.body;
   if (!warehouseId) throw new ApiError(400, 'المستودع مطلوب');
+  const { rows: itemRows } = await pool.query('SELECT is_stock_tracked FROM items WHERE id = $1', [id]);
+  if (!itemRows[0]) throw new ApiError(404, 'صنف غير موجود');
+  if (!itemRows[0].is_stock_tracked) throw new ApiError(400, 'هذا صنف خدمي ولا يُدار كمخزون');
   const result = await withTransaction(async (client) => {
     const invAccount = await getInventoryControlAccount(client);
     const openingAccount = await getAccountByCode(client, '3900');
@@ -131,6 +138,9 @@ router.post('/items/:id/adjust', asyncHandler(async (req, res) => {
   const delta = Number(qty);
   if (!warehouseId) throw new ApiError(400, 'المستودع مطلوب');
   if (!delta) throw new ApiError(400, 'كمية التسوية يجب ألا تساوي صفر');
+  const { rows: itemRows } = await pool.query('SELECT is_stock_tracked FROM items WHERE id = $1', [id]);
+  if (!itemRows[0]) throw new ApiError(404, 'صنف غير موجود');
+  if (!itemRows[0].is_stock_tracked) throw new ApiError(400, 'هذا صنف خدمي ولا يُدار كمخزون');
   const result = await withTransaction(async (client) => {
     const invAccount = await getInventoryControlAccount(client);
     const varianceAccount = await getAccountByCode(client, '5900');
@@ -391,6 +401,15 @@ router.post('/boms', asyncHandler(async (req, res) => {
   if (!outputItemId) throw new ApiError(400, 'الصنف الناتج مطلوب');
   if (!Array.isArray(lines) || lines.length === 0) throw new ApiError(400, 'أضف مكوّناً واحداً على الأقل للوصفة');
   const result = await withTransaction(async (client) => {
+    const { rows: itemChecks } = await client.query(
+      `SELECT id, is_stock_tracked FROM items WHERE id = ANY($1::uuid[])`,
+      [[outputItemId, ...lines.map((l) => l.componentItemId)]]
+    );
+    const trackedById = new Map(itemChecks.map((i) => [i.id, i.is_stock_tracked]));
+    if (!trackedById.get(outputItemId)) throw new ApiError(400, 'الصنف الناتج يجب أن يكون صنفاً سلعياً يخضع لتتبّع المخزون');
+    for (const line of lines) {
+      if (!trackedById.get(line.componentItemId)) throw new ApiError(400, 'لا يمكن استخدام صنف خدمي كمكوّن في وصفة تصنيع');
+    }
     const { rows } = await client.query(
       `INSERT INTO boms (output_item_id, name, output_qty) VALUES ($1,$2,$3) RETURNING *`,
       [outputItemId, name || 'وصفة قياسية', Number(outputQty) || 1]

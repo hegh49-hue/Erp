@@ -48,7 +48,6 @@ function buildZatcaQR(sellerName, vatNumber, isoTimestamp, total, vatAmount) {
 router.post('/checkout', asyncHandler(async (req, res) => {
   const { cashierId, warehouseId, orderType, orderSource, payMethod, payEntityId, payMethodLabel, items } = req.body;
   if (!cashierId) throw new ApiError(400, 'يرجى اختيار الكاشير');
-  if (!warehouseId) throw new ApiError(400, 'يرجى اختيار المستودع');
   if (!Array.isArray(items) || items.length === 0) throw new ApiError(400, 'السلة فارغة');
 
   const result = await withTransaction(async (client) => {
@@ -59,6 +58,10 @@ router.post('/checkout', asyncHandler(async (req, res) => {
     const itemIds = items.map((i) => i.itemId);
     const { rows: itemRows } = await client.query('SELECT * FROM items WHERE id = ANY($1::uuid[])', [itemIds]);
     const itemsById = new Map(itemRows.map((i) => [i.id, i]));
+
+    const requiresWarehouse = itemRows.some((i) => i.is_stock_tracked);
+    if (requiresWarehouse && !warehouseId) throw new ApiError(400, 'يرجى اختيار المستودع — السلة تحتوي أصنافاً سلعية');
+    const effectiveWarehouseId = requiresWarehouse ? warehouseId : (warehouseId || null);
 
     let subtotal = 0, vat = 0, cogsTotal = 0;
     const lineDetails = [];
@@ -75,7 +78,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
       let unitCost = 0;
       if (item.is_stock_tracked) {
         const stock = await issueStock(client, {
-          itemId: item.id, warehouseId, qty, moveDate: new Date().toISOString().slice(0, 10),
+          itemId: item.id, warehouseId: effectiveWarehouseId, qty, moveDate: new Date().toISOString().slice(0, 10),
           note: 'بيع نقاط البيع', refType: 'pos_sale', createdBy: req.user.id,
         });
         unitCost = stock.unitCost;
@@ -126,7 +129,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
         createdBy: req.user.id,
         lines: [
           { accountId: cogsAccount.id, debit: cogsTotal, credit: 0 },
-          { accountId: invAccount.id, debit: 0, credit: cogsTotal, entityId: warehouseId },
+          { accountId: invAccount.id, debit: 0, credit: cogsTotal, entityId: effectiveWarehouseId },
         ],
       });
     }
@@ -135,7 +138,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
       `INSERT INTO pos_invoices (number, issued_at, warehouse_id, cashier_id, order_type, order_source, pay_method_label,
          pay_account_id, pay_entity_id, subtotal, vat, total, cogs_total, qr_base64, journal_entry_id, cogs_entry_id, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
-      [number, isoTs, warehouseId, cashierId, orderType || 'محلي', orderSource || 'محلي', payMethodLabel || payMethod,
+      [number, isoTs, effectiveWarehouseId, cashierId, orderType || 'محلي', orderSource || 'محلي', payMethodLabel || payMethod,
         payAccount.id, payEntity, subtotal, vat, total, cogsTotal, qrBase64, revenueEntry.id, cogsEntry?.id || null, req.user.id]
     );
     const invoice = invRows[0];
@@ -154,7 +157,7 @@ router.get('/invoices', asyncHandler(async (req, res) => {
   const { rows: invoices } = await pool.query(
     `SELECT inv.*, w.name AS warehouse_name, c.name AS cashier_name
      FROM pos_invoices inv
-     JOIN subledger_entities w ON w.id = inv.warehouse_id
+     LEFT JOIN subledger_entities w ON w.id = inv.warehouse_id
      JOIN subledger_entities c ON c.id = inv.cashier_id
      ORDER BY inv.issued_at DESC`
   );
@@ -166,7 +169,7 @@ router.get('/invoices/:id', asyncHandler(async (req, res) => {
   const { rows: invRows } = await pool.query(
     `SELECT inv.*, w.name AS warehouse_name, c.name AS cashier_name
      FROM pos_invoices inv
-     JOIN subledger_entities w ON w.id = inv.warehouse_id
+     LEFT JOIN subledger_entities w ON w.id = inv.warehouse_id
      JOIN subledger_entities c ON c.id = inv.cashier_id
      WHERE inv.id = $1`,
     [id]
