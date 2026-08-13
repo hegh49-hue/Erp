@@ -122,6 +122,9 @@ function renderPosCart() {
   document.getElementById('posVat').textContent = vat.toFixed(2);
   document.getElementById('posTotal').textContent = (sub + vat).toFixed(2);
   document.getElementById('posCheckoutBtn').disabled = posCart.length === 0;
+
+  const requiresWarehouse = posCart.some((c) => c.tracked || c.isBom);
+  document.getElementById('posWarehouseField').style.display = requiresWarehouse ? 'block' : 'none';
 }
 
 document.getElementById('posCheckoutBtn').onclick = async () => {
@@ -143,6 +146,10 @@ document.getElementById('posCheckoutBtn').onclick = async () => {
     items: posCart.map((c) => ({ itemId: c.id, qty: c.qty })),
     customerId: posSelectedCustomer?.id || null,
     loyaltyPointsToRedeem: redeemInput ? parseInt(redeemInput.value, 10) || 0 : 0,
+    customerName: document.getElementById('posOrderCustomerName').value.trim(),
+    customerPhone: document.getElementById('posOrderCustomerPhone').value.trim(),
+    customerArea: document.getElementById('posOrderCustomerArea').value.trim(),
+    orderNote: document.getElementById('posOrderNote').value.trim(),
   };
   try {
     const invoice = await Api.post('/pos/checkout', body);
@@ -153,6 +160,10 @@ document.getElementById('posCheckoutBtn').onclick = async () => {
     posSelectedCustomer = null;
     document.getElementById('posCustomerSelected').style.display = 'none';
     document.getElementById('posCustomerSelected').innerHTML = '';
+    document.getElementById('posOrderCustomerName').value = '';
+    document.getElementById('posOrderCustomerPhone').value = '';
+    document.getElementById('posOrderCustomerArea').value = '';
+    document.getElementById('posOrderNote').value = '';
     showPosReceipt(invoice, document.querySelector('#posCashierSelect option:checked').textContent);
   } catch (err) { alert(err.message); }
 };
@@ -160,7 +171,14 @@ document.getElementById('posCheckoutBtn').onclick = async () => {
 function showPosReceipt(inv, cashierName) {
   const el = document.getElementById('posReceiptContent');
   const dateStr = new Date(inv.issued_at).toLocaleString('ar-SA');
-  const itemsHtml = inv.lines.map((it) => `<div class="r-row"><span>${escapeHtml(it.name)} × ${it.qty}</span><span>${(it.price * it.qty).toFixed(2)}</span></div>`).join('');
+  const lineTotal = (it) => (it.price ?? it.unit_price ?? 0) * it.qty;
+  const itemsHtml = inv.lines.map((it) => `<div class="r-row"><span>${escapeHtml(it.name)} × ${it.qty}</span><span>${lineTotal(it).toFixed(2)}</span></div>`).join('');
+  const customerHtml = (inv.customer_name || inv.customer_phone || inv.customer_area) ? `
+    <div class="r-row"><span>العميل</span><span>${escapeHtml(inv.customer_name || '')}</span></div>
+    ${inv.customer_phone ? `<div class="r-row"><span>الجوال</span><span>${escapeHtml(inv.customer_phone)}</span></div>` : ''}
+    ${inv.customer_area ? `<div class="r-row"><span>المنطقة</span><span>${escapeHtml(inv.customer_area)}</span></div>` : ''}
+    <div class="r-line"></div>` : '';
+  const noteHtml = inv.order_note ? `<div class="r-line"></div><div class="r-row" style="font-weight:700;"><span>ملاحظة</span></div><div style="font-size:12px; padding:4px 0;">${escapeHtml(inv.order_note)}</div>` : '';
   el.innerHTML = `
     <h3>${escapeHtml(companyCache?.name || 'منشأتي')}</h3>
     <div class="r-sub">${escapeHtml(companyCache?.address || '')}</div>
@@ -171,19 +189,58 @@ function showPosReceipt(inv, cashierName) {
     <div class="r-row"><span>الكاشير</span><span>${escapeHtml(cashierName || '')}</span></div>
     <div class="r-row"><span>الدفع</span><span>${escapeHtml(inv.pay_method_label)}</span></div>
     <div class="r-line"></div>
+    ${customerHtml}
     ${itemsHtml}
     <div class="r-line"></div>
     <div class="r-row"><span>قبل الضريبة</span><span>${Number(inv.subtotal).toFixed(2)}</span></div>
     <div class="r-row"><span>ضريبة 15%</span><span>${Number(inv.vat).toFixed(2)}</span></div>
     <div class="r-row" style="font-weight:700; font-size:13px; border-top:1px dashed #999; padding-top:6px;"><span>الإجمالي</span><span>${Number(inv.total).toFixed(2)} ر.س</span></div>
+    ${noteHtml}
     <div id="posQrcode"></div>
     <div class="r-footer">شكراً لزيارتكم</div>`;
   document.getElementById('posQrcode').innerHTML = '';
   if (inv.qr_base64 && window.QRCode) new QRCode(document.getElementById('posQrcode'), { text: inv.qr_base64, width: 110, height: 110, correctLevel: QRCode.CorrectLevel.M });
+  document.getElementById('posKitchenTicketContent').dataset.invoice = JSON.stringify(inv);
+  document.getElementById('posReceiptContent').style.display = 'block';
+  document.getElementById('posKitchenTicketContent').style.display = 'none';
   document.getElementById('posReceiptOverlay').classList.add('open');
 }
 document.getElementById('posCloseReceiptBtn').onclick = () => document.getElementById('posReceiptOverlay').classList.remove('open');
 document.getElementById('posNewSaleBtn').onclick = () => document.getElementById('posReceiptOverlay').classList.remove('open');
+
+function buildKitchenTicketHtml(inv) {
+  const dateStr = new Date(inv.issued_at).toLocaleString('ar-SA');
+  const itemsHtml = inv.lines.map((it) => `<div class="r-row" style="font-size:15px; font-weight:600;"><span>${escapeHtml(it.name)}</span><span>× ${it.qty}</span></div>`).join('');
+  return `
+    <h3>نسخة المطبخ / التغليف</h3>
+    <div class="r-row"><span>فاتورة</span><span>#${inv.number}</span></div>
+    <div class="r-row"><span>التاريخ</span><span>${dateStr}</span></div>
+    <div class="r-row"><span>نوع الطلب</span><span>${escapeHtml(inv.order_type || '')}</span></div>
+    <div class="r-row"><span>مصدر الطلب</span><span>${escapeHtml(inv.order_source || '')}</span></div>
+    ${(inv.customer_name || inv.customer_phone || inv.customer_area) ? `
+      <div class="r-line"></div>
+      <div class="r-row"><span>العميل</span><span>${escapeHtml(inv.customer_name || '')}</span></div>
+      ${inv.customer_phone ? `<div class="r-row"><span>الجوال</span><span>${escapeHtml(inv.customer_phone)}</span></div>` : ''}
+      ${inv.customer_area ? `<div class="r-row"><span>المنطقة</span><span>${escapeHtml(inv.customer_area)}</span></div>` : ''}` : ''}
+    <div class="r-line"></div>
+    ${itemsHtml}
+    <div class="r-line"></div>
+    ${inv.order_note ? `<div style="border:2px solid var(--stamp); border-radius:8px; padding:10px; margin-top:8px;">
+        <div style="font-weight:700; font-size:13px; margin-bottom:4px;">⚠ ملاحظة</div>
+        <div style="font-size:15px; font-weight:700;">${escapeHtml(inv.order_note)}</div>
+      </div>` : '<div class="r-sub">لا توجد ملاحظات</div>'}`;
+}
+document.getElementById('posPrintKitchenBtn').onclick = () => {
+  const raw = document.getElementById('posKitchenTicketContent').dataset.invoice;
+  if (!raw) return;
+  const inv = JSON.parse(raw);
+  document.getElementById('posKitchenTicketContent').innerHTML = buildKitchenTicketHtml(inv);
+  document.getElementById('posReceiptContent').style.display = 'none';
+  document.getElementById('posKitchenTicketContent').style.display = 'block';
+  window.print();
+  document.getElementById('posReceiptContent').style.display = 'block';
+  document.getElementById('posKitchenTicketContent').style.display = 'none';
+};
 document.getElementById('posPrintBtn').onclick = () => window.print();
 
 async function renderPosInvoices() {

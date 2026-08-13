@@ -60,7 +60,7 @@ function buildZatcaQR(sellerName, vatNumber, isoTimestamp, total, vatAmount) {
 router.post('/checkout', asyncHandler(async (req, res) => {
   const {
     cashierId, warehouseId, orderType, orderSource, payMethod, payEntityId, payMethodLabel, items,
-    customerId, loyaltyPointsToRedeem,
+    customerId, loyaltyPointsToRedeem, customerName, customerPhone, customerArea, orderNote,
   } = req.body;
   if (!cashierId) throw new ApiError(400, 'يرجى اختيار الكاشير');
   assertOwnCashier(req, cashierId);
@@ -222,11 +222,13 @@ router.post('/checkout', asyncHandler(async (req, res) => {
     const { rows: invRows } = await client.query(
       `INSERT INTO pos_invoices (number, issued_at, business_date, warehouse_id, cashier_id, order_type, order_source, pay_method_label,
          pay_account_id, pay_entity_id, subtotal, vat, total, cogs_total, qr_base64, journal_entry_id, cogs_entry_id, created_by,
-         customer_id, loyalty_points_earned, loyalty_points_redeemed, loyalty_discount)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+         customer_id, loyalty_points_earned, loyalty_points_redeemed, loyalty_discount,
+         customer_name, customer_phone, customer_area, order_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
       [number, isoTs, businessDate, effectiveWarehouseId, cashierId, orderType || 'محلي', orderSource || 'محلي', payMethodLabel || payMethod,
         payAccount.id, payEntity, finalSubtotal, finalVat, total, cogsTotal, qrBase64, revenueEntry.id, cogsEntry?.id || null, req.user.id,
-        customerId || null, pointsEarned, pointsRedeemed, loyaltyDiscount]
+        customerId || null, pointsEarned, pointsRedeemed, loyaltyDiscount,
+        (customerName || '').trim() || null, (customerPhone || '').trim() || null, (customerArea || '').trim() || null, (orderNote || '').trim() || null]
     );
     const invoice = invRows[0];
     for (const d of lineDetails) {
