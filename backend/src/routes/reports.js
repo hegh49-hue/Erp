@@ -144,4 +144,61 @@ router.get('/equity-statement', asyncHandler(async (req, res) => {
   res.json({ rows, netIncome, totalOpening, totalClosing });
 }));
 
+// ---------- POS: sales by payment method (netting credit note returns) ----------
+router.get('/pos-by-payment', asyncHandler(async (req, res) => {
+  const { from, to } = req.query;
+  const { rows } = await pool.query(
+    `SELECT inv.pay_method_label, c.name AS cashier_name,
+       COUNT(*) FILTER (WHERE inv.doc_type = 'sale') AS sales_count,
+       COUNT(*) FILTER (WHERE inv.doc_type = 'credit_note') AS returns_count,
+       COALESCE(SUM(CASE WHEN inv.doc_type = 'sale' THEN inv.total ELSE -inv.total END), 0)::numeric AS net_amount
+     FROM pos_invoices inv
+     JOIN subledger_entities c ON c.id = inv.cashier_id
+     WHERE ($1::date IS NULL OR inv.issued_at::date >= $1) AND ($2::date IS NULL OR inv.issued_at::date <= $2)
+     GROUP BY inv.pay_method_label, c.name
+     ORDER BY inv.pay_method_label, c.name`,
+    [from || null, to || null]
+  );
+  const methodsMap = new Map();
+  for (const r of rows) {
+    if (!methodsMap.has(r.pay_method_label)) methodsMap.set(r.pay_method_label, { payMethodLabel: r.pay_method_label, salesCount: 0, returnsCount: 0, netAmount: 0, byCashier: [] });
+    const m = methodsMap.get(r.pay_method_label);
+    m.salesCount += Number(r.sales_count);
+    m.returnsCount += Number(r.returns_count);
+    m.netAmount += Number(r.net_amount);
+    m.byCashier.push({ cashierName: r.cashier_name, salesCount: Number(r.sales_count), returnsCount: Number(r.returns_count), netAmount: Number(r.net_amount) });
+  }
+  const methods = [...methodsMap.values()];
+  const grandTotal = methods.reduce((s, m) => s + m.netAmount, 0);
+  const grandSalesCount = methods.reduce((s, m) => s + m.salesCount, 0);
+  const grandReturnsCount = methods.reduce((s, m) => s + m.returnsCount, 0);
+  res.json({ methods, grandTotal, grandSalesCount, grandReturnsCount });
+}));
+
+// ---------- POS: sales by item or category (netting credit note returns) ----------
+router.get('/pos-sales-by-item', asyncHandler(async (req, res) => {
+  const { from, to, groupBy } = req.query;
+  const useCategory = groupBy === 'category';
+  const groupExpr = useCategory ? 'i.category' : 'i.id, i.name, i.unit';
+  const { rows } = await pool.query(
+    `SELECT ${useCategory ? 'i.category AS label' : 'i.id, i.name AS label, i.unit'},
+       COALESCE(SUM(CASE WHEN inv.doc_type = 'sale' THEN l.qty ELSE -l.qty END), 0)::numeric AS qty,
+       COALESCE(SUM(CASE WHEN inv.doc_type = 'sale' THEN l.qty * l.unit_price ELSE -(l.qty * l.unit_price) END), 0)::numeric AS revenue
+     FROM pos_invoice_lines l
+     JOIN pos_invoices inv ON inv.id = l.invoice_id
+     JOIN items i ON i.id = l.item_id
+     WHERE ($1::date IS NULL OR inv.issued_at::date >= $1) AND ($2::date IS NULL OR inv.issued_at::date <= $2)
+     GROUP BY ${groupExpr}
+     ORDER BY revenue DESC`,
+    [from || null, to || null]
+  );
+  const totalRevenue = rows.reduce((s, r) => s + Number(r.revenue), 0);
+  const totalQty = rows.reduce((s, r) => s + Number(r.qty), 0);
+  const withPct = rows.map((r) => ({
+    ...r, qty: Number(r.qty), revenue: Number(r.revenue),
+    pct: totalRevenue !== 0 ? (Number(r.revenue) / totalRevenue) * 100 : 0,
+  }));
+  res.json({ rows: withPct, totalRevenue, totalQty });
+}));
+
 module.exports = router;

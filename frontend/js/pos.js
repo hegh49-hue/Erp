@@ -180,11 +180,14 @@ async function renderPosInvoices() {
   const invoices = await Api.get('/pos/invoices');
   body.innerHTML = '';
   const todayStr = new Date().toDateString();
-  let todayTotal = 0, todayCount = 0;
+  let todayNet = 0, todayCount = 0;
   invoices.forEach((inv) => {
-    if (new Date(inv.issued_at).toDateString() === todayStr) { todayTotal += Number(inv.total); todayCount++; }
+    const isReturn = inv.doc_type === 'credit_note';
+    if (new Date(inv.issued_at).toDateString() === todayStr) { todayNet += isReturn ? -Number(inv.total) : Number(inv.total); todayCount++; }
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="mono">#${inv.number}</td><td>${new Date(inv.issued_at).toLocaleString('ar-SA')}</td><td>${escapeHtml(inv.cashier_name)}</td><td>${escapeHtml(inv.warehouse_name)}</td><td>${escapeHtml(inv.pay_method_label)}</td><td class="mono">${money(inv.total)}</td>
+    const badge = isReturn ? `<span class="badge warn">مردود${inv.original_invoice_number ? ' — أصل #' + escapeHtml(inv.original_invoice_number) : ''}</span>` : '';
+    tr.innerHTML = `<td class="mono">#${inv.number} ${badge}</td><td>${new Date(inv.issued_at).toLocaleString('ar-SA')}</td><td>${escapeHtml(inv.cashier_name)}</td><td>${escapeHtml(inv.warehouse_name || '—')}</td><td>${escapeHtml(inv.pay_method_label)}</td>
+      <td class="mono" style="color:${isReturn ? 'var(--stamp)' : 'inherit'};">${isReturn ? '-' : ''}${money(inv.total)}</td>
       <td><button class="del-entry" data-id="${inv.id}">عرض</button></td>`;
     tr.querySelector('button').onclick = async () => {
       const detail = await Api.get('/pos/invoices/' + inv.id);
@@ -192,6 +195,127 @@ async function renderPosInvoices() {
     };
     body.appendChild(tr);
   });
-  document.getElementById('posInvSummary').textContent = `اليوم: ${todayCount} فاتورة • ${todayTotal.toFixed(2)} ر.س`;
+  document.getElementById('posInvSummary').textContent = `اليوم: ${todayCount} مستند • صافي ${todayNet.toFixed(2)} ر.س`;
   if (invoices.length === 0) body.innerHTML = '<tr><td colspan="7" class="empty-note">لا توجد فواتير مسجّلة بعد</td></tr>';
+}
+
+// ---------- Sales returns (credit notes) ----------
+async function initPosReturns() {
+  document.getElementById('retSearchResult').innerHTML = '';
+  document.getElementById('retInvoiceNumber').value = '';
+  renderPosReturnsHistory();
+}
+document.getElementById('retSearchBtn').onclick = async () => {
+  const number = document.getElementById('retInvoiceNumber').value.trim();
+  const out = document.getElementById('retSearchResult');
+  if (!number) { alert('أدخل رقم الفاتورة'); return; }
+  out.innerHTML = '<div class="empty-note">جارٍ البحث...</div>';
+  try {
+    const inv = await Api.get('/pos/invoices/by-number/' + encodeURIComponent(number));
+    renderReturnForm(inv);
+  } catch (err) {
+    out.innerHTML = `<div class="msg err" style="display:block;">${escapeHtml(err.message)}</div>`;
+  }
+};
+function renderReturnForm(inv) {
+  const out = document.getElementById('retSearchResult');
+  const returnableLines = inv.lines.filter((l) => l.remainingQty > 0);
+  if (returnableLines.length === 0) {
+    out.innerHTML = `<div class="msg" style="display:block;">لا توجد كميات متبقية قابلة للإرجاع في الفاتورة #${escapeHtml(inv.number)}</div>`;
+    return;
+  }
+  const rows = returnableLines.map((l) => `<tr data-item="${l.itemId}" data-max="${l.remainingQty}">
+      <td>${escapeHtml(l.name)} (${escapeHtml(l.unit)})</td>
+      <td class="mono">${l.soldQty}</td>
+      <td class="mono">${l.alreadyReturnedQty}</td>
+      <td class="mono">${l.remainingQty}</td>
+      <td><input type="number" step="0.0001" min="0" max="${l.remainingQty}" class="return-qty-input" style="width:100px;" value="0"></td>
+    </tr>`).join('');
+  out.innerHTML = `
+    <div class="form-card">
+      <div class="panel-header" style="margin-bottom:10px;"><h2 style="font-size:15px;">فاتورة #${escapeHtml(inv.number)} — ${escapeHtml(inv.cashier_name)}</h2></div>
+      <table><thead><tr><th>الصنف</th><th>الكمية المباعة</th><th>مُرجَع سابقاً</th><th>المتبقي القابل للإرجاع</th><th>الكمية المرتجَعة الآن</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <button class="btn btn-primary" id="retSubmitBtn" style="width:100%; margin-top:12px;">تنفيذ الإرجاع</button>
+      <div id="retMsg" class="msg" style="display:none;"></div>
+    </div>`;
+  document.getElementById('retSubmitBtn').onclick = async () => {
+    const lines = [...out.querySelectorAll('tr[data-item]')].map((tr) => ({
+      itemId: tr.dataset.item, qty: parseFloat(tr.querySelector('.return-qty-input').value) || 0,
+    })).filter((l) => l.qty > 0);
+    const msg = document.getElementById('retMsg');
+    if (lines.length === 0) { alert('أدخل كمية إرجاع لصنف واحد على الأقل'); return; }
+    try {
+      const cn = await Api.post(`/pos/invoices/${inv.id}/return`, { lines });
+      msg.className = 'msg ok'; msg.textContent = `✓ تم إصدار إشعار دائن #${cn.number}`; msg.style.display = 'block';
+      setTimeout(() => { document.getElementById('retSearchResult').innerHTML = ''; document.getElementById('retInvoiceNumber').value = ''; }, 1500);
+      renderPosReturnsHistory();
+    } catch (err) {
+      msg.className = 'msg err'; msg.textContent = err.message; msg.style.display = 'block';
+    }
+  };
+}
+async function renderPosReturnsHistory() {
+  const wrap = document.getElementById('retHistoryList');
+  wrap.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
+  const invoices = await Api.get('/pos/invoices');
+  const returns = invoices.filter((i) => i.doc_type === 'credit_note');
+  if (returns.length === 0) { wrap.innerHTML = '<div class="empty-note">لا توجد مردودات مسجّلة بعد</div>'; return; }
+  wrap.innerHTML = '';
+  returns.forEach((cn) => {
+    const card = document.createElement('div');
+    card.className = 'entry-card';
+    card.innerHTML = `<div class="entry-head" style="cursor:default;">
+      <div class="eh-left"><span class="eh-date">${new Date(cn.issued_at).toLocaleString('ar-SA')}</span>
+        <span class="eh-desc">#${escapeHtml(cn.number)} — مرجع فاتورة #${escapeHtml(cn.original_invoice_number || '-')}</span></div>
+      <span class="eh-total mono" style="color:var(--stamp);">-${money(cn.total)}</span></div>`;
+    wrap.appendChild(card);
+  });
+}
+
+// ---------- POS reports ----------
+document.getElementById('rptFrom').addEventListener('change', renderPosReports);
+document.getElementById('rptTo').addEventListener('change', renderPosReports);
+document.getElementById('rptGroupBy').addEventListener('change', renderPosReports);
+async function renderPosReports() {
+  if (!document.getElementById('rptFrom').value) {
+    const now = new Date();
+    document.getElementById('rptFrom').value = todayISO(new Date(now.getFullYear(), now.getMonth(), 1));
+    document.getElementById('rptTo').value = todayISO();
+  }
+  const from = document.getElementById('rptFrom').value, to = document.getElementById('rptTo').value;
+  const out = document.getElementById('rptOutput');
+  out.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
+
+  if (activePosRpt === 'payment') {
+    const r = await Api.get(`/reports/pos-by-payment?from=${from}&to=${to}`);
+    if (r.methods.length === 0) { out.innerHTML = '<div class="empty-note">لا توجد بيانات في هذه الفترة</div>'; return; }
+    const methodsHtml = r.methods.map((m) => `
+      <div class="entry-card">
+        <div class="entry-head" style="cursor:default;">
+          <div class="eh-left"><span class="eh-desc">${escapeHtml(m.payMethodLabel)}</span><span class="badge">${m.salesCount} بيع${m.returnsCount ? ' / ' + m.returnsCount + ' مردود' : ''}</span></div>
+          <span class="eh-total mono">${money(m.netAmount)}</span>
+        </div>
+        <div style="padding:0 16px 14px 16px;">
+          <table style="margin-top:0;"><thead><tr><th>الكاشير</th><th>عدد المبيعات</th><th>عدد المردودات</th><th>الصافي</th></tr></thead>
+          <tbody>${m.byCashier.map((c) => `<tr><td>${escapeHtml(c.cashierName)}</td><td class="mono">${c.salesCount}</td><td class="mono">${c.returnsCount}</td><td class="mono">${money(c.netAmount)}</td></tr>`).join('')}</tbody></table>
+        </div>
+      </div>`).join('');
+    out.innerHTML = `${methodsHtml}
+      <div class="stat-cards">
+        <div class="stat-card"><div class="label">إجمالي عدد المبيعات</div><div class="value mono">${r.grandSalesCount}</div></div>
+        <div class="stat-card"><div class="label">إجمالي عدد المردودات</div><div class="value mono">${r.grandReturnsCount}</div></div>
+        <div class="stat-card"><div class="label">الإجمالي العام (صافي)</div><div class="value mono">${money(r.grandTotal)}</div></div>
+      </div>`;
+  } else {
+    const groupBy = document.getElementById('rptGroupBy').value;
+    const r = await Api.get(`/reports/pos-sales-by-item?from=${from}&to=${to}&groupBy=${groupBy}`);
+    if (r.rows.length === 0) { out.innerHTML = '<div class="empty-note">لا توجد بيانات في هذه الفترة</div>'; return; }
+    const headLabel = groupBy === 'category' ? 'المجموعة' : 'الصنف';
+    const rows = r.rows.map((row) => `<tr><td>${escapeHtml(row.label || 'غير مصنّف')}</td><td class="mono">${row.qty}</td><td class="mono">${money(row.revenue)}</td>${groupBy === 'category' ? `<td class="mono">${row.pct.toFixed(1)}%</td>` : ''}</tr>`).join('');
+    out.innerHTML = `
+      <table><thead><tr><th>${headLabel}</th><th>الكمية المباعة</th><th>الإيراد</th>${groupBy === 'category' ? '<th>النسبة من الإجمالي</th>' : ''}</tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr class="total-row"><td>الإجمالي</td><td class="mono">${r.totalQty}</td><td class="mono">${money(r.totalRevenue)}</td>${groupBy === 'category' ? '<td class="mono">100%</td>' : ''}</tr></tfoot></table>`;
+  }
 }

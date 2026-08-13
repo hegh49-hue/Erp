@@ -64,6 +64,8 @@
 <div class="subnav" id="posSubnav" style="display:none;">
   <button class="active" data-possub="sell">نقطة البيع</button>
   <button data-possub="invoices">سجل الفواتير</button>
+  <button data-possub="returns">مردودات المبيعات</button>
+  <button data-possub="reports">التقارير</button>
 </div>
 
 <main>
@@ -371,6 +373,33 @@
         <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الكاشير</th><th>المستودع</th><th>الدفع</th><th>الإجمالي</th><th></th></tr></thead>
         <tbody id="posInvBody"></tbody>
       </table>
+    </div>
+
+    <div class="possub" id="pos-returns" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>مردودات المبيعات</h2></div>
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>رقم الفاتورة</label><input id="retInvoiceNumber" placeholder="مثال: 000001"></div>
+        <button class="btn btn-outline" id="retSearchBtn">بحث</button>
+      </div>
+      <div id="retSearchResult"></div>
+      <h3 style="font-size:14px; margin:20px 0 10px 0;">آخر المردودات</h3>
+      <div id="retHistoryList"></div>
+    </div>
+
+    <div class="possub" id="pos-reports" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>تقارير المبيعات</h2></div>
+      <div class="subtabs">
+        <button class="subtab-btn active" data-posrpt="payment">حسب طريقة الدفع</button>
+        <button class="subtab-btn" data-posrpt="items">حسب الأصناف والمجموعات</button>
+      </div>
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>من تاريخ</label><input type="date" id="rptFrom"></div>
+        <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="rptTo"></div>
+        <div class="field" id="rptGroupWrap" style="margin-bottom:0; display:none;"><label>عرض حسب</label>
+          <select id="rptGroupBy"><option value="item">الصنف</option><option value="category">المجموعة</option></select>
+        </div>
+      </div>
+      <div id="rptOutput"></div>
     </div>
   </div><!-- /view-pos -->
 

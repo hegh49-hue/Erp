@@ -115,12 +115,25 @@ function openPosSub(subKey) {
   el.classList.add('active');
   if (subKey === 'sell') initPosSell();
   if (subKey === 'invoices') renderPosInvoices();
+  if (subKey === 'returns') initPosReturns();
+  if (subKey === 'reports') renderPosReports();
 }
 document.querySelectorAll('#posSubnav button').forEach((btn) => btn.addEventListener('click', () => openPosSub(btn.dataset.possub)));
 
-document.querySelectorAll('.subtab-btn').forEach((b) => {
+let activePosRpt = 'payment';
+document.querySelectorAll('#pos-reports .subtab-btn').forEach((b) => {
   b.onclick = () => {
-    document.querySelectorAll('.subtab-btn').forEach((x) => x.classList.remove('active'));
+    document.querySelectorAll('#pos-reports .subtab-btn').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active');
+    activePosRpt = b.dataset.posrpt;
+    document.getElementById('rptGroupWrap').style.display = activePosRpt === 'items' ? 'block' : 'none';
+    renderPosReports();
+  };
+});
+
+document.querySelectorAll('#view-statements .subtab-btn').forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll('#view-statements .subtab-btn').forEach((x) => x.classList.remove('active'));
     b.classList.add('active');
     activeFs = b.dataset.fs;
     document.getElementById('fsIncomeFilters').style.display = activeFs === 'income' ? 'flex' : 'none';
