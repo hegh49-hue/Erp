@@ -138,7 +138,7 @@ td .mono{font-weight:700;}
 .r-footer{text-align:center; font-family:'Tajawal'; font-size:10.5px; color:#777; margin-top:6px;}
 .receipt-actions{display:flex; gap:8px; padding:0 18px 18px 18px;}
 .receipt-actions button{flex:1; padding:10px; border-radius:8px; border:none; font-family:'Tajawal'; font-weight:700; cursor:pointer;}
-@media print{ body *{visibility:hidden;} .receipt,.receipt *{visibility:visible;} .receipt{position:absolute; top:0; right:0; width:100%;} .modal-overlay{position:absolute; background:none;} }
+@media print{ body *{visibility:hidden;} .receipt,.receipt *,.printable-report,.printable-report *{visibility:visible;} .receipt{position:absolute; top:0; right:0; width:100%;} .printable-report{position:absolute; top:0; right:0; width:100%; padding:20px;} .modal-overlay{position:absolute; background:none;} }
 ::-webkit-scrollbar{width:8px; height:8px;}
 ::-webkit-scrollbar-thumb{background:#d8d2c2; border-radius:8px;}
 

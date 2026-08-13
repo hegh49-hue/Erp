@@ -116,6 +116,7 @@ function openPosSub(subKey) {
   if (subKey === 'sell') initPosSell();
   if (subKey === 'invoices') renderPosInvoices();
   if (subKey === 'returns') initPosReturns();
+  if (subKey === 'shifts') initPosShifts();
   if (subKey === 'reports') renderPosReports();
 }
 document.querySelectorAll('#posSubnav button').forEach((btn) => btn.addEventListener('click', () => openPosSub(btn.dataset.possub)));
@@ -127,6 +128,8 @@ document.querySelectorAll('#pos-reports .subtab-btn').forEach((b) => {
     b.classList.add('active');
     activePosRpt = b.dataset.posrpt;
     document.getElementById('rptGroupWrap').style.display = activePosRpt === 'items' ? 'block' : 'none';
+    document.getElementById('rptRangeFilters').style.display = activePosRpt === 'closing' ? 'none' : 'flex';
+    document.getElementById('rptClosingFilters').style.display = activePosRpt === 'closing' ? 'flex' : 'none';
     renderPosReports();
   };
 });

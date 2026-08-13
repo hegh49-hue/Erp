@@ -179,11 +179,11 @@ async function renderPosInvoices() {
   body.innerHTML = '<tr><td colspan="7" class="empty-note">جارٍ التحميل...</td></tr>';
   const invoices = await Api.get('/pos/invoices');
   body.innerHTML = '';
-  const todayStr = new Date().toDateString();
+  const todayBusinessDate = currentBusinessDate(companyCache?.business_day_start_hour ?? 6);
   let todayNet = 0, todayCount = 0;
   invoices.forEach((inv) => {
     const isReturn = inv.doc_type === 'credit_note';
-    if (new Date(inv.issued_at).toDateString() === todayStr) { todayNet += isReturn ? -Number(inv.total) : Number(inv.total); todayCount++; }
+    if (inv.business_date.slice(0, 10) === todayBusinessDate) { todayNet += isReturn ? -Number(inv.total) : Number(inv.total); todayCount++; }
     const tr = document.createElement('tr');
     const badge = isReturn ? `<span class="badge warn">مردود${inv.original_invoice_number ? ' — أصل #' + escapeHtml(inv.original_invoice_number) : ''}</span>` : '';
     tr.innerHTML = `<td class="mono">#${inv.number} ${badge}</td><td>${new Date(inv.issued_at).toLocaleString('ar-SA')}</td><td>${escapeHtml(inv.cashier_name)}</td><td>${escapeHtml(inv.warehouse_name || '—')}</td><td>${escapeHtml(inv.pay_method_label)}</td>
@@ -307,7 +307,7 @@ async function renderPosReports() {
         <div class="stat-card"><div class="label">إجمالي عدد المردودات</div><div class="value mono">${r.grandReturnsCount}</div></div>
         <div class="stat-card"><div class="label">الإجمالي العام (صافي)</div><div class="value mono">${money(r.grandTotal)}</div></div>
       </div>`;
-  } else {
+  } else if (activePosRpt === 'items') {
     const groupBy = document.getElementById('rptGroupBy').value;
     const r = await Api.get(`/reports/pos-sales-by-item?from=${from}&to=${to}&groupBy=${groupBy}`);
     if (r.rows.length === 0) { out.innerHTML = '<div class="empty-note">لا توجد بيانات في هذه الفترة</div>'; return; }
@@ -317,5 +317,140 @@ async function renderPosReports() {
       <table><thead><tr><th>${headLabel}</th><th>الكمية المباعة</th><th>الإيراد</th>${groupBy === 'category' ? '<th>النسبة من الإجمالي</th>' : ''}</tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr class="total-row"><td>الإجمالي</td><td class="mono">${r.totalQty}</td><td class="mono">${money(r.totalRevenue)}</td>${groupBy === 'category' ? '<td class="mono">100%</td>' : ''}</tr></tfoot></table>`;
+  } else {
+    if (!document.getElementById('rptClosingDate').value) {
+      document.getElementById('rptClosingDate').value = currentBusinessDate(companyCache?.business_day_start_hour ?? 6);
+    }
+    const businessDate = document.getElementById('rptClosingDate').value;
+    const r = await Api.get(`/reports/pos-daily-closing?businessDate=${businessDate}`);
+    const payRows = r.byPaymentMethod.map((m) => `<tr><td>${escapeHtml(m.payMethodLabel)}</td><td class="mono">${m.salesCount}</td><td class="mono">${m.returnsCount}</td><td class="mono">${money(m.netAmount)}</td></tr>`).join('');
+    const topRows = r.topItems.map((it, idx) => `<tr><td>${idx + 1}</td><td>${escapeHtml(it.name)}</td><td class="mono">${it.qty}</td><td class="mono">${money(it.revenue)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-note">لا توجد بيانات</td></tr>';
+    out.innerHTML = `
+      <div class="printable-report">
+        <h3 style="margin:0 0 4px 0;">تقرير إغلاق يوم العمل — ${escapeHtml(r.businessDate)}</h3>
+        <div class="stat-cards">
+          <div class="stat-card"><div class="label">قبل الضريبة</div><div class="value mono">${money(r.subtotal)}</div></div>
+          <div class="stat-card"><div class="label">الضريبة</div><div class="value mono">${money(r.vat)}</div></div>
+          <div class="stat-card"><div class="label">إجمالي المبيعات</div><div class="value mono">${money(r.total)}</div></div>
+          <div class="stat-card"><div class="label">عدد الفواتير</div><div class="value mono">${r.invoiceCount}</div></div>
+        </div>
+        <div class="stat-cards">
+          <div class="stat-card"><div class="label">عدد المردودات</div><div class="value mono">${r.returnsCount}</div></div>
+          <div class="stat-card"><div class="label">قيمة المردودات</div><div class="value mono">${money(r.returnsTotal)}</div></div>
+          <div class="stat-card"><div class="label">صافي المبيعات</div><div class="value mono" style="color:var(--green);">${money(r.netTotal)}</div></div>
+        </div>
+        <h3 style="font-size:14px; margin:16px 0 8px 0;">توزيع المبيعات حسب طريقة الدفع</h3>
+        <table><thead><tr><th>الطريقة</th><th>عدد المبيعات</th><th>عدد المردودات</th><th>الصافي</th></tr></thead><tbody>${payRows || '<tr><td colspan="4" class="empty-note">لا توجد بيانات</td></tr>'}</tbody></table>
+        <h3 style="font-size:14px; margin:16px 0 8px 0;">أعلى 5 أصناف مبيعاً</h3>
+        <table><thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>الإيراد</th></tr></thead><tbody>${topRows}</tbody></table>
+      </div>`;
   }
+}
+document.getElementById('rptClosingDate').addEventListener('change', renderPosReports);
+document.getElementById('rptPrintBtn').addEventListener('click', () => window.print());
+
+// ---------- Cashier shifts (till reconciliation) ----------
+async function initPosShifts() {
+  const sel = document.getElementById('shCashierSelect');
+  const cur = sel.value;
+  const cashiers = await Api.get('/pos/cashiers');
+  sel.innerHTML = cashiers.map((c) => `<option value="${c.id}" ${c.id === cur ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+  if (!sel.value && cashiers[0]) sel.value = cashiers[0].id;
+  await refreshShiftsView();
+}
+document.getElementById('shCashierSelect').addEventListener('change', refreshShiftsView);
+async function refreshShiftsView() {
+  const cashierId = document.getElementById('shCashierSelect').value;
+  if (!cashierId) { document.getElementById('shCurrentShift').innerHTML = '<div class="empty-note">أضف كاشيراً أولاً من نقطة البيع</div>'; document.getElementById('shHistoryList').innerHTML = ''; return; }
+  await Promise.all([renderCurrentShift(cashierId), renderShiftsHistory(cashierId)]);
+}
+
+async function renderCurrentShift(cashierId) {
+  const wrap = document.getElementById('shCurrentShift');
+  wrap.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
+  const shift = await Api.get('/pos/shifts/open/' + cashierId);
+  if (!shift) {
+    wrap.innerHTML = `
+      <div class="form-card">
+        <div class="field"><label>الرصيد الافتتاحي (العهدة النقدية)</label><input id="shOpeningFloat" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="field"><label>ملاحظة</label><input id="shOpenNote" placeholder="اختياري"></div>
+        <button class="btn btn-blue" id="shOpenBtn" style="width:100%;">فتح شفت جديد</button>
+        <div id="shOpenMsg" class="msg" style="display:none;"></div>
+      </div>`;
+    document.getElementById('shOpenBtn').onclick = async () => {
+      const openingFloat = parseFloat(document.getElementById('shOpeningFloat').value) || 0;
+      const note = document.getElementById('shOpenNote').value.trim();
+      const msg = document.getElementById('shOpenMsg');
+      try {
+        await Api.post('/pos/shifts/open', { cashierId, openingFloat, note });
+        refreshShiftsView();
+      } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; msg.style.display = 'block'; }
+    };
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="form-card">
+      <div class="panel-header" style="margin-bottom:10px;"><h2 style="font-size:15px;">شفت مفتوح منذ ${new Date(shift.opened_at).toLocaleString('ar-SA')}</h2><span class="badge">${escapeHtml(shift.cashier_name)}</span></div>
+      <div class="stat-cards">
+        <div class="stat-card"><div class="label">الرصيد الافتتاحي</div><div class="value mono">${money(shift.opening_float)}</div></div>
+        <div class="stat-card"><div class="label">صافي المبيعات النقدية حتى الآن</div><div class="value mono">${money(shift.liveNetCash)}</div></div>
+        <div class="stat-card"><div class="label">الرصيد المتوقع الآن</div><div class="value mono">${money(shift.liveExpectedAmount)}</div></div>
+      </div>
+      <div class="field"><label>المبلغ الفعلي المعدود (لإغلاق الشفت)</label><input id="shCountedAmount" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="field"><label>ملاحظة</label><input id="shCloseNote" placeholder="اختياري"></div>
+      <button class="btn btn-primary" id="shCloseBtn" style="width:100%;">إغلاق الشفت</button>
+      <div id="shCloseMsg" class="msg" style="display:none;"></div>
+    </div>`;
+  document.getElementById('shCloseBtn').onclick = async () => {
+    const countedAmount = document.getElementById('shCountedAmount').value;
+    const note = document.getElementById('shCloseNote').value.trim();
+    const msg = document.getElementById('shCloseMsg');
+    if (countedAmount === '') { alert('أدخل المبلغ الفعلي المعدود'); return; }
+    if (!confirm('إغلاق الشفت نهائي ولا يمكن التراجع عنه. متابعة؟')) return;
+    try {
+      const closed = await Api.post(`/pos/shifts/${shift.id}/close`, { countedAmount: parseFloat(countedAmount), note });
+      renderShiftReport(closed);
+      refreshShiftsView();
+    } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; msg.style.display = 'block'; }
+  };
+}
+
+function renderShiftReport(shift) {
+  const varianceColor = Number(shift.variance) === 0 ? 'var(--green)' : (Number(shift.variance) > 0 ? 'var(--blue)' : 'var(--stamp)');
+  const varianceLabel = Number(shift.variance) === 0 ? 'مطابق تماماً' : (Number(shift.variance) > 0 ? 'زيادة' : 'عجز');
+  const html = `
+    <div class="printable-report">
+      <h3 style="margin:0 0 4px 0;">تقرير تصفية شفت — ${escapeHtml(shift.cashier_name)}</h3>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">من ${new Date(shift.opened_at).toLocaleString('ar-SA')} إلى ${new Date(shift.closed_at).toLocaleString('ar-SA')}</div>
+      <div class="stat-cards">
+        <div class="stat-card"><div class="label">الرصيد الافتتاحي</div><div class="value mono">${money(shift.opening_float)}</div></div>
+        <div class="stat-card"><div class="label">الرصيد المتوقع</div><div class="value mono">${money(shift.expected_amount)}</div></div>
+        <div class="stat-card"><div class="label">المبلغ الفعلي المعدود</div><div class="value mono">${money(shift.counted_amount)}</div></div>
+        <div class="stat-card"><div class="label">الفرق</div><div class="value mono" style="color:${varianceColor};">${money(shift.variance)} (${varianceLabel})</div></div>
+      </div>
+      ${shift.note ? `<div style="font-size:12.5px; color:var(--muted);">ملاحظة: ${escapeHtml(shift.note)}</div>` : ''}
+    </div>
+    <button class="btn btn-outline" id="shReportPrintBtn" style="margin-top:10px;">طباعة</button>`;
+  document.getElementById('countModalContent').innerHTML = html;
+  document.getElementById('countModalOverlay').classList.add('open');
+  document.getElementById('shReportPrintBtn').onclick = () => window.print();
+}
+
+async function renderShiftsHistory(cashierId) {
+  const wrap = document.getElementById('shHistoryList');
+  wrap.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
+  const shifts = await Api.get('/pos/shifts?cashierId=' + cashierId);
+  const closed = shifts.filter((s) => s.status === 'closed');
+  if (closed.length === 0) { wrap.innerHTML = '<div class="empty-note">لا توجد شفتات مغلقة بعد</div>'; return; }
+  wrap.innerHTML = '';
+  closed.forEach((s) => {
+    const varianceColor = Number(s.variance) === 0 ? 'var(--green)' : (Number(s.variance) > 0 ? 'var(--blue)' : 'var(--stamp)');
+    const card = document.createElement('div');
+    card.className = 'entry-card';
+    card.innerHTML = `<div class="entry-head">
+      <div class="eh-left"><span class="eh-date">${new Date(s.opened_at).toLocaleString('ar-SA')}</span><span class="eh-desc">إلى ${new Date(s.closed_at).toLocaleString('ar-SA')}</span></div>
+      <span class="eh-total mono" style="color:${varianceColor};">${money(s.variance)}</span></div>`;
+    card.querySelector('.entry-head').onclick = () => renderShiftReport(s);
+    wrap.appendChild(card);
+  });
 }

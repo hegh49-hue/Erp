@@ -10,19 +10,20 @@ router.get('/company', asyncHandler(async (req, res) => {
 }));
 
 router.put('/company', asyncHandler(async (req, res) => {
-  const { name, vatNumber, phone, address, logo } = req.body;
+  const { name, vatNumber, phone, address, logo, businessDayStartHour } = req.body;
+  const startHour = Number.isInteger(Number(businessDayStartHour)) ? Math.min(23, Math.max(0, Number(businessDayStartHour))) : 6;
   const { rows: existing } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 1');
   let row;
   if (existing[0]) {
     const { rows } = await pool.query(
-      `UPDATE companies SET name=$1, vat_number=$2, phone=$3, address=$4, logo=$5, updated_at=now() WHERE id=$6 RETURNING *`,
-      [name, vatNumber, phone, address, logo, existing[0].id]
+      `UPDATE companies SET name=$1, vat_number=$2, phone=$3, address=$4, logo=$5, business_day_start_hour=$6, updated_at=now() WHERE id=$7 RETURNING *`,
+      [name, vatNumber, phone, address, logo, startHour, existing[0].id]
     );
     row = rows[0];
   } else {
     const { rows } = await pool.query(
-      `INSERT INTO companies (name, vat_number, phone, address, logo) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [name, vatNumber, phone, address, logo]
+      `INSERT INTO companies (name, vat_number, phone, address, logo, business_day_start_hour) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [name, vatNumber, phone, address, logo, startHour]
     );
     row = rows[0];
   }

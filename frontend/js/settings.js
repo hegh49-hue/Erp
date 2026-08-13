@@ -34,14 +34,21 @@ document.getElementById('logoInput').addEventListener('change', async (e) => {
   renderLogoPreview();
 });
 
+(function populateBusinessDayHourSelect() {
+  const sel = document.getElementById('setBusinessDayStartHour');
+  sel.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:00</option>`).join('');
+})();
+
 async function renderSettings() {
   companyCache = await Api.get('/settings/company');
   document.getElementById('setCompanyName').value = companyCache?.name || '';
   document.getElementById('setVatNumber').value = companyCache?.vat_number || '';
   document.getElementById('setPhone').value = companyCache?.phone || '';
   document.getElementById('setAddress').value = companyCache?.address || '';
+  document.getElementById('setBusinessDayStartHour').value = companyCache?.business_day_start_hour ?? 6;
   pendingLogo = companyCache?.logo || null;
   renderLogoPreview();
+  document.getElementById('secEmail').value = currentUser?.email || '';
   renderChannelsTable();
 }
 document.getElementById('saveCompanyBtn').onclick = async () => {
@@ -51,6 +58,7 @@ document.getElementById('saveCompanyBtn').onclick = async () => {
     phone: document.getElementById('setPhone').value.trim(),
     address: document.getElementById('setAddress').value.trim(),
     logo: pendingLogo,
+    businessDayStartHour: parseInt(document.getElementById('setBusinessDayStartHour').value, 10),
   };
   try {
     companyCache = await Api.put('/settings/company', body);
@@ -58,6 +66,27 @@ document.getElementById('saveCompanyBtn').onclick = async () => {
     const msg = document.getElementById('settingsMsg');
     msg.style.display = 'block'; setTimeout(() => msg.style.display = 'none', 2000);
   } catch (err) { alert(err.message); }
+};
+
+document.getElementById('saveSecurityBtn').onclick = async () => {
+  const newEmail = document.getElementById('secEmail').value.trim();
+  const currentPassword = document.getElementById('secCurrentPassword').value;
+  const newPassword = document.getElementById('secNewPassword').value;
+  const confirmPassword = document.getElementById('secConfirmPassword').value;
+  const msg = document.getElementById('securityMsg');
+  if (!currentPassword) { msg.className = 'msg err'; msg.textContent = 'أدخل كلمة المرور الحالية للتأكيد'; msg.style.display = 'block'; return; }
+  if (newPassword && newPassword !== confirmPassword) { msg.className = 'msg err'; msg.textContent = 'كلمة المرور الجديدة غير مطابقة للتأكيد'; msg.style.display = 'block'; return; }
+  try {
+    await Api.put('/auth/me', { currentPassword, newEmail, newPassword: newPassword || undefined, confirmPassword: newPassword ? confirmPassword : undefined });
+    msg.className = 'msg ok'; msg.textContent = '✓ تم الحفظ — يرجى تسجيل الدخول من جديد'; msg.style.display = 'block';
+    setTimeout(() => {
+      Api.setToken(null);
+      currentUser = null;
+      document.getElementById('loginEmail').value = newEmail;
+      document.getElementById('loginPassword').value = '';
+      showLogin();
+    }, 1200);
+  } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; msg.style.display = 'block'; }
 };
 
 document.getElementById('addChannelBtn').onclick = async () => {

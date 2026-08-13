@@ -65,6 +65,7 @@
   <button class="active" data-possub="sell">نقطة البيع</button>
   <button data-possub="invoices">سجل الفواتير</button>
   <button data-possub="returns">مردودات المبيعات</button>
+  <button data-possub="shifts">شفتات الكاشير</button>
   <button data-possub="reports">التقارير</button>
 </div>
 
@@ -386,18 +387,33 @@
       <div id="retHistoryList"></div>
     </div>
 
+    <div class="possub" id="pos-shifts" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>شفتات الكاشير</h2></div>
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0; flex:2; min-width:200px;"><label>الكاشير</label><select id="shCashierSelect"></select></div>
+      </div>
+      <div id="shCurrentShift"></div>
+      <h3 style="font-size:14px; margin:20px 0 10px 0;">سجل الشفتات</h3>
+      <div id="shHistoryList"></div>
+    </div>
+
     <div class="possub" id="pos-reports" style="display:none; padding:22px 26px;">
       <div class="panel-header"><h2>تقارير المبيعات</h2></div>
       <div class="subtabs">
         <button class="subtab-btn active" data-posrpt="payment">حسب طريقة الدفع</button>
         <button class="subtab-btn" data-posrpt="items">حسب الأصناف والمجموعات</button>
+        <button class="subtab-btn" data-posrpt="closing">تقرير إغلاق اليوم</button>
       </div>
-      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;" id="rptRangeFilters">
         <div class="field" style="margin-bottom:0;"><label>من تاريخ</label><input type="date" id="rptFrom"></div>
         <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="rptTo"></div>
         <div class="field" id="rptGroupWrap" style="margin-bottom:0; display:none;"><label>عرض حسب</label>
           <select id="rptGroupBy"><option value="item">الصنف</option><option value="category">المجموعة</option></select>
         </div>
+      </div>
+      <div class="form-card" style="display:none; gap:14px; align-items:flex-end; flex-wrap:wrap;" id="rptClosingFilters">
+        <div class="field" style="margin-bottom:0;"><label>يوم العمل</label><input type="date" id="rptClosingDate"></div>
+        <button class="btn btn-outline" id="rptPrintBtn">طباعة</button>
       </div>
       <div id="rptOutput"></div>
     </div>
@@ -420,8 +436,25 @@
         <div class="field"><label>الجوال</label><input id="setPhone" placeholder="05xxxxxxxx"></div>
       </div>
       <div class="field"><label>العنوان</label><input id="setAddress" placeholder="المدينة، الحي، الشارع"></div>
+      <div class="field">
+        <label>وقت بداية يوم العمل</label>
+        <select id="setBusinessDayStartHour"></select>
+        <div style="font-size:11.5px; color:var(--muted); margin-top:4px;">أي بيع قبل هذا الوقت يُحتسب ضمن يوم العمل السابق (مفيد للشفتات التي تمتد بعد منتصف الليل).</div>
+      </div>
       <button class="btn btn-blue" id="saveCompanyBtn" style="width:100%;">حفظ</button>
       <div id="settingsMsg" class="msg ok" style="display:none;">✓ تم الحفظ</div>
+    </div>
+
+    <div class="form-card" style="max-width:480px;">
+      <label style="display:block; font-size:13px; font-weight:800; margin-bottom:10px;">الأمان / حسابي</label>
+      <div class="field"><label>البريد الإلكتروني (اسم المستخدم)</label><input id="secEmail" type="email"></div>
+      <div class="field"><label>كلمة المرور الحالية</label><input id="secCurrentPassword" type="password" placeholder="مطلوبة لتأكيد أي تغيير"></div>
+      <div class="field-row">
+        <div class="field"><label>كلمة المرور الجديدة (اختياري)</label><input id="secNewPassword" type="password"></div>
+        <div class="field"><label>تأكيد كلمة المرور الجديدة</label><input id="secConfirmPassword" type="password"></div>
+      </div>
+      <button class="btn btn-blue" id="saveSecurityBtn" style="width:100%;">حفظ وتسجيل الدخول من جديد</button>
+      <div id="securityMsg" class="msg" style="display:none;"></div>
     </div>
 
     <div class="form-card" style="max-width:640px;">

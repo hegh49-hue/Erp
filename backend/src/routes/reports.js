@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../db/pool');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { accountBalance } = require('../services/accounting');
+const { computeBusinessDate } = require('../services/businessDay');
 
 const router = express.Router();
 
@@ -154,7 +155,7 @@ router.get('/pos-by-payment', asyncHandler(async (req, res) => {
        COALESCE(SUM(CASE WHEN inv.doc_type = 'sale' THEN inv.total ELSE -inv.total END), 0)::numeric AS net_amount
      FROM pos_invoices inv
      JOIN subledger_entities c ON c.id = inv.cashier_id
-     WHERE ($1::date IS NULL OR inv.issued_at::date >= $1) AND ($2::date IS NULL OR inv.issued_at::date <= $2)
+     WHERE ($1::date IS NULL OR inv.business_date >= $1) AND ($2::date IS NULL OR inv.business_date <= $2)
      GROUP BY inv.pay_method_label, c.name
      ORDER BY inv.pay_method_label, c.name`,
     [from || null, to || null]
@@ -187,7 +188,7 @@ router.get('/pos-sales-by-item', asyncHandler(async (req, res) => {
      FROM pos_invoice_lines l
      JOIN pos_invoices inv ON inv.id = l.invoice_id
      JOIN items i ON i.id = l.item_id
-     WHERE ($1::date IS NULL OR inv.issued_at::date >= $1) AND ($2::date IS NULL OR inv.issued_at::date <= $2)
+     WHERE ($1::date IS NULL OR inv.business_date >= $1) AND ($2::date IS NULL OR inv.business_date <= $2)
      GROUP BY ${groupExpr}
      ORDER BY revenue DESC`,
     [from || null, to || null]
@@ -199,6 +200,60 @@ router.get('/pos-sales-by-item', asyncHandler(async (req, res) => {
     pct: totalRevenue !== 0 ? (Number(r.revenue) / totalRevenue) * 100 : 0,
   }));
   res.json({ rows: withPct, totalRevenue, totalQty });
+}));
+
+// ---------- POS: end-of-day closing report for a single business day ----------
+router.get('/pos-daily-closing', asyncHandler(async (req, res) => {
+  let { businessDate } = req.query;
+  if (!businessDate) {
+    const { rows: companyRows } = await pool.query('SELECT business_day_start_hour FROM companies ORDER BY created_at LIMIT 1');
+    businessDate = computeBusinessDate(new Date(), companyRows[0]?.business_day_start_hour ?? 6);
+  }
+
+  const { rows: totals } = await pool.query(
+    `SELECT
+       COALESCE(SUM(CASE WHEN doc_type = 'sale' THEN subtotal ELSE 0 END), 0)::numeric AS subtotal,
+       COALESCE(SUM(CASE WHEN doc_type = 'sale' THEN vat ELSE 0 END), 0)::numeric AS vat,
+       COALESCE(SUM(CASE WHEN doc_type = 'sale' THEN total ELSE 0 END), 0)::numeric AS total,
+       COUNT(*) FILTER (WHERE doc_type = 'sale') AS invoice_count,
+       COUNT(*) FILTER (WHERE doc_type = 'credit_note') AS returns_count,
+       COALESCE(SUM(CASE WHEN doc_type = 'credit_note' THEN total ELSE 0 END), 0)::numeric AS returns_total
+     FROM pos_invoices WHERE business_date = $1`,
+    [businessDate]
+  );
+  const t = totals[0];
+  const netTotal = Number(t.total) - Number(t.returns_total);
+
+  const { rows: byPaymentMethod } = await pool.query(
+    `SELECT pay_method_label,
+       COALESCE(SUM(CASE WHEN doc_type = 'sale' THEN total ELSE -total END), 0)::numeric AS net_amount,
+       COUNT(*) FILTER (WHERE doc_type = 'sale') AS sales_count,
+       COUNT(*) FILTER (WHERE doc_type = 'credit_note') AS returns_count
+     FROM pos_invoices WHERE business_date = $1
+     GROUP BY pay_method_label ORDER BY pay_method_label`,
+    [businessDate]
+  );
+
+  const { rows: topItems } = await pool.query(
+    `SELECT i.name,
+       COALESCE(SUM(CASE WHEN inv.doc_type = 'sale' THEN l.qty ELSE -l.qty END), 0)::numeric AS qty,
+       COALESCE(SUM(CASE WHEN inv.doc_type = 'sale' THEN l.qty * l.unit_price ELSE -(l.qty * l.unit_price) END), 0)::numeric AS revenue
+     FROM pos_invoice_lines l
+     JOIN pos_invoices inv ON inv.id = l.invoice_id
+     JOIN items i ON i.id = l.item_id
+     WHERE inv.business_date = $1
+     GROUP BY i.id, i.name
+     ORDER BY revenue DESC LIMIT 5`,
+    [businessDate]
+  );
+
+  res.json({
+    businessDate,
+    subtotal: Number(t.subtotal), vat: Number(t.vat), total: Number(t.total), invoiceCount: Number(t.invoice_count),
+    returnsCount: Number(t.returns_count), returnsTotal: Number(t.returns_total), netTotal,
+    byPaymentMethod: byPaymentMethod.map((r) => ({ payMethodLabel: r.pay_method_label, netAmount: Number(r.net_amount), salesCount: Number(r.sales_count), returnsCount: Number(r.returns_count) })),
+    topItems: topItems.map((r) => ({ name: r.name, qty: Number(r.qty), revenue: Number(r.revenue) })),
+  });
 }));
 
 module.exports = router;

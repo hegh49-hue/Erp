@@ -3,6 +3,7 @@ const { pool, withTransaction } = require('../db/pool');
 const { asyncHandler, ApiError } = require('../middleware/asyncHandler');
 const { postJournalEntry } = require('../services/accounting');
 const { getAccountByCode, issueStock, receiveStock } = require('../services/inventory');
+const { computeBusinessDate } = require('../services/businessDay');
 
 const router = express.Router();
 
@@ -106,10 +107,11 @@ router.post('/checkout', asyncHandler(async (req, res) => {
     const number = String(seqRows[0].n).padStart(6, '0');
     const now = new Date();
     const isoTs = now.toISOString();
+    const businessDate = computeBusinessDate(now, company.business_day_start_hour);
     const qrBase64 = buildZatcaQR(company.name, company.vat_number, isoTs, total, vat);
 
     const revenueEntry = await postJournalEntry(client, {
-      entryDate: isoTs.slice(0, 10),
+      entryDate: businessDate,
       description: `مبيعات نقاط البيع - فاتورة #${number}`,
       reference: number,
       sourceType: 'pos_sale',
@@ -122,7 +124,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
       const cogsAccount = await getAccountByCode(client, '5000');
       const invAccount = await getAccountByCode(client, '1200');
       cogsEntry = await postJournalEntry(client, {
-        entryDate: isoTs.slice(0, 10),
+        entryDate: businessDate,
         description: `تكلفة البضاعة المباعة - فاتورة #${number}`,
         reference: number,
         sourceType: 'pos_sale_cogs',
@@ -135,10 +137,10 @@ router.post('/checkout', asyncHandler(async (req, res) => {
     }
 
     const { rows: invRows } = await client.query(
-      `INSERT INTO pos_invoices (number, issued_at, warehouse_id, cashier_id, order_type, order_source, pay_method_label,
+      `INSERT INTO pos_invoices (number, issued_at, business_date, warehouse_id, cashier_id, order_type, order_source, pay_method_label,
          pay_account_id, pay_entity_id, subtotal, vat, total, cogs_total, qr_base64, journal_entry_id, cogs_entry_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
-      [number, isoTs, effectiveWarehouseId, cashierId, orderType || 'محلي', orderSource || 'محلي', payMethodLabel || payMethod,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+      [number, isoTs, businessDate, effectiveWarehouseId, cashierId, orderType || 'محلي', orderSource || 'محلي', payMethodLabel || payMethod,
         payAccount.id, payEntity, subtotal, vat, total, cogsTotal, qrBase64, revenueEntry.id, cogsEntry?.id || null, req.user.id]
     );
     const invoice = invRows[0];
@@ -268,9 +270,10 @@ router.post('/invoices/:id/return', asyncHandler(async (req, res) => {
     );
     const trackedById = new Map(itemRows.map((i) => [i.id, i.is_stock_tracked]));
 
+    const { rows: companyRows } = await client.query('SELECT business_day_start_hour FROM companies ORDER BY created_at LIMIT 1');
     const now = new Date();
     const isoTs = now.toISOString();
-    const entryDate = isoTs.slice(0, 10);
+    const entryDate = computeBusinessDate(now, companyRows[0]?.business_day_start_hour ?? 6);
 
     for (const d of lineDetails) {
       if (trackedById.get(d.itemId) && original.warehouse_id) {
@@ -311,10 +314,10 @@ router.post('/invoices/:id/return', asyncHandler(async (req, res) => {
     }
 
     const { rows: cnRows } = await client.query(
-      `INSERT INTO pos_invoices (number, issued_at, doc_type, original_invoice_id, warehouse_id, cashier_id, order_type, order_source,
+      `INSERT INTO pos_invoices (number, issued_at, business_date, doc_type, original_invoice_id, warehouse_id, cashier_id, order_type, order_source,
          pay_method_label, pay_account_id, pay_entity_id, subtotal, vat, total, cogs_total, journal_entry_id, cogs_entry_id, created_by)
-       VALUES ($1,$2,'credit_note',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
-      [number, isoTs, original.id, original.warehouse_id, original.cashier_id, original.order_type, original.order_source,
+       VALUES ($1,$2,$3,'credit_note',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+      [number, isoTs, entryDate, original.id, original.warehouse_id, original.cashier_id, original.order_type, original.order_source,
         original.pay_method_label, original.pay_account_id, original.pay_entity_id, subtotal, vat, total, cogsTotal,
         revenueEntry.id, cogsEntry?.id || null, req.user.id]
     );
@@ -328,6 +331,120 @@ router.post('/invoices/:id/return', asyncHandler(async (req, res) => {
     return { ...creditNote, original_invoice_number: original.number };
   });
   res.status(201).json(result);
+}));
+
+// ---------- Cashier shifts (till reconciliation) ----------
+async function computeExpectedCash(client, { cashierId, openingFloat, fromTs, toTs }) {
+  const { rows } = await client.query(
+    `SELECT COALESCE(SUM(CASE WHEN doc_type = 'sale' THEN total ELSE -total END), 0)::numeric AS net_cash
+     FROM pos_invoices
+     WHERE cashier_id = $1 AND pay_method_label = 'نقدي' AND issued_at >= $2 AND issued_at <= $3`,
+    [cashierId, fromTs, toTs]
+  );
+  const netCash = Number(rows[0].net_cash);
+  return { expected: Number(openingFloat) + netCash, netCash };
+}
+
+router.get('/shifts', asyncHandler(async (req, res) => {
+  const { cashierId, status } = req.query;
+  const params = [];
+  let where = 'TRUE';
+  if (cashierId) { params.push(cashierId); where += ` AND s.cashier_id = $${params.length}`; }
+  if (status) { params.push(status); where += ` AND s.status = $${params.length}`; }
+  const { rows } = await pool.query(
+    `SELECT s.*, c.name AS cashier_name FROM cashier_shifts s
+     JOIN subledger_entities c ON c.id = s.cashier_id
+     WHERE ${where} ORDER BY s.opened_at DESC`,
+    params
+  );
+  res.json(rows);
+}));
+
+router.get('/shifts/open/:cashierId', asyncHandler(async (req, res) => {
+  const { cashierId } = req.params;
+  const { rows } = await pool.query(
+    `SELECT s.*, c.name AS cashier_name FROM cashier_shifts s
+     JOIN subledger_entities c ON c.id = s.cashier_id
+     WHERE s.cashier_id = $1 AND s.status = 'open'`,
+    [cashierId]
+  );
+  if (!rows[0]) return res.json(null);
+  const { expected, netCash } = await computeExpectedCash(pool, {
+    cashierId, openingFloat: rows[0].opening_float, fromTs: rows[0].opened_at, toTs: new Date(),
+  });
+  res.json({ ...rows[0], liveExpectedAmount: expected, liveNetCash: netCash });
+}));
+
+router.get('/shifts/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(
+    `SELECT s.*, c.name AS cashier_name, o.full_name AS opened_by_name, cl.full_name AS closed_by_name
+     FROM cashier_shifts s
+     JOIN subledger_entities c ON c.id = s.cashier_id
+     LEFT JOIN users o ON o.id = s.opened_by
+     LEFT JOIN users cl ON cl.id = s.closed_by
+     WHERE s.id = $1`,
+    [id]
+  );
+  const shift = rows[0];
+  if (!shift) throw new ApiError(404, 'شفت غير موجود');
+  if (shift.status === 'open') {
+    const { expected, netCash } = await computeExpectedCash(pool, {
+      cashierId: shift.cashier_id, openingFloat: shift.opening_float, fromTs: shift.opened_at, toTs: new Date(),
+    });
+    shift.liveExpectedAmount = expected;
+    shift.liveNetCash = netCash;
+  }
+  res.json(shift);
+}));
+
+router.post('/shifts/open', asyncHandler(async (req, res) => {
+  const { cashierId, openingFloat, note } = req.body;
+  if (!cashierId) throw new ApiError(400, 'يرجى اختيار الكاشير');
+  const float = Number(openingFloat) || 0;
+  if (float < 0) throw new ApiError(400, 'الرصيد الافتتاحي لا يمكن أن يكون سالباً');
+
+  const result = await withTransaction(async (client) => {
+    const { rows: existing } = await client.query(
+      "SELECT id FROM cashier_shifts WHERE cashier_id = $1 AND status = 'open'", [cashierId]
+    );
+    if (existing[0]) throw new ApiError(409, 'يوجد شفت مفتوح بالفعل لهذا الكاشير');
+    const { rows: companyRows } = await client.query('SELECT business_day_start_hour FROM companies ORDER BY created_at LIMIT 1');
+    const now = new Date();
+    const businessDate = computeBusinessDate(now, companyRows[0]?.business_day_start_hour ?? 6);
+    const { rows } = await client.query(
+      `INSERT INTO cashier_shifts (cashier_id, business_date, opening_float, opened_by) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [cashierId, businessDate, float, req.user.id]
+    );
+    return rows[0];
+  });
+  res.status(201).json(result);
+}));
+
+router.post('/shifts/:id/close', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { countedAmount, note } = req.body;
+  if (countedAmount === undefined || countedAmount === null || countedAmount === '') throw new ApiError(400, 'يرجى إدخال المبلغ الفعلي المعدود');
+
+  const result = await withTransaction(async (client) => {
+    const { rows } = await client.query('SELECT * FROM cashier_shifts WHERE id = $1 FOR UPDATE', [id]);
+    const shift = rows[0];
+    if (!shift) throw new ApiError(404, 'شفت غير موجود');
+    if (shift.status !== 'open') throw new ApiError(409, 'هذا الشفت مُغلق بالفعل');
+    const now = new Date();
+    const { expected } = await computeExpectedCash(client, {
+      cashierId: shift.cashier_id, openingFloat: shift.opening_float, fromTs: shift.opened_at, toTs: now,
+    });
+    const counted = Number(countedAmount);
+    const variance = counted - expected;
+    const { rows: updated } = await client.query(
+      `UPDATE cashier_shifts SET status='closed', closed_at=$1, closed_by=$2, counted_amount=$3, expected_amount=$4, variance=$5, note=$6
+       WHERE id=$7 RETURNING *`,
+      [now, req.user.id, counted, expected, variance, note || null, id]
+    );
+    return updated[0];
+  });
+  res.json(result);
 }));
 
 module.exports = router;
