@@ -53,6 +53,7 @@
   <button data-view="ledger">دفتر الأستاذ</button>
   <button data-view="trial">ميزان المراجعة</button>
   <button data-view="statements">القوائم المالية</button>
+  <button data-view="cashier-control">رقابة الكاشير</button>
 </div>
 <div class="subnav" id="inventorySubnav" style="display:none;">
   <button class="active" data-invview="warehouses">المستودعات</button>
@@ -224,6 +225,20 @@
         <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="eqTo"></div>
       </div>
       <div id="fsOutput"></div>
+    </div>
+
+    <div class="subview" id="view-cashier-control" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>رقابة الكاشير</h2><div id="ccExportBtns" style="display:flex; gap:8px;"></div></div>
+      <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>من تاريخ</label><input type="date" id="ccFrom"></div>
+        <div class="field" style="margin-bottom:0;"><label>إلى تاريخ</label><input type="date" id="ccTo"></div>
+        <button class="btn btn-blue" id="ccLoadBtn">تحديث</button>
+      </div>
+      <div id="ccSummaryOutput"></div>
+      <div id="ccTimelineWrap" style="display:none;">
+        <h3 style="font-size:14px; margin:20px 0 10px 0;" id="ccTimelineTitle"></h3>
+        <div id="ccTimelineOutput"></div>
+      </div>
     </div>
   </div><!-- /view-accounting -->
 

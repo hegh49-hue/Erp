@@ -385,3 +385,83 @@ async function renderStatements() {
     }));
   }
 }
+
+// ---------- Cashier control / audit report (detect possible manipulation) ----------
+document.getElementById('ccLoadBtn').addEventListener('click', renderCashierControl);
+async function renderCashierControl() {
+  if (!document.getElementById('ccFrom').value) {
+    const now = new Date();
+    document.getElementById('ccFrom').value = todayISO(new Date(now.getFullYear(), now.getMonth(), 1));
+    document.getElementById('ccTo').value = todayISO();
+  }
+  const from = document.getElementById('ccFrom').value;
+  const to = document.getElementById('ccTo').value;
+  const out = document.getElementById('ccSummaryOutput');
+  out.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
+  document.getElementById('ccTimelineWrap').style.display = 'none';
+  const data = await Api.get(`/reports/cashier-control?from=${from}&to=${to}`);
+  if (data.rows.length === 0) { out.innerHTML = '<div class="empty-note">لا يوجد كاشيرون بعد</div>'; return; }
+  const rows = data.rows.map((r) => `
+    <tr class="cc-row" data-cashier-id="${r.cashierId}" data-cashier-name="${escapeHtml(r.cashierName)}"
+      style="cursor:pointer; ${r.flags.length ? 'background:var(--stamp-soft);' : ''}">
+      <td>${escapeHtml(r.cashierName)}</td>
+      <td class="mono">${r.salesCount}</td>
+      <td class="mono">${money(r.salesTotal)}</td>
+      <td class="mono">${r.returnsCount}</td>
+      <td class="mono">${money(r.returnsTotal)}</td>
+      <td class="mono">${r.returnRatioPct.toFixed(1)}%</td>
+      <td class="mono">${money(r.loyaltyDiscountTotal)}</td>
+      <td class="mono">${r.creditSalesCount} / ${money(r.creditSalesTotal)}</td>
+      <td class="mono">${r.disbApprovedCount} / ${money(r.disbApprovedTotal)}</td>
+      <td class="mono">${r.disbRejectedCount}</td>
+      <td class="mono">${r.shiftsCount}</td>
+      <td class="mono" style="${r.cashVarianceTotal < 0 ? 'color:var(--stamp); font-weight:700;' : ''}">${money(r.cashVarianceTotal)}</td>
+      <td class="mono" style="${r.networkVarianceTotal !== 0 ? 'color:var(--stamp); font-weight:700;' : ''}">${money(r.networkVarianceTotal)}</td>
+      <td>${r.flags.length ? r.flags.map((f) => `<span class="badge warn" style="display:block; margin:2px 0;">${escapeHtml(f)}</span>`).join('') : '<span class="badge">لا ملاحظات</span>'}</td>
+    </tr>`).join('');
+  out.innerHTML = `
+    <table><thead><tr>
+      <th>الكاشير</th><th>عدد المبيعات</th><th>إجمالي المبيعات</th><th>عدد المرتجعات</th><th>إجمالي المرتجعات</th><th>نسبة المرتجعات</th>
+      <th>خصم نقاط الولاء</th><th>مبيعات آجلة (عدد/قيمة)</th><th>صرف معتمد (عدد/قيمة)</th><th>صرف مرفوض</th><th>عدد الشفتات</th><th>إجمالي فرق النقدية</th><th>إجمالي فرق الشبكة</th><th>ملاحظات رقابية</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    <div class="empty-note" style="margin-top:8px;">انقر على أي صف لعرض السجل التفصيلي لعمليات ذلك الكاشير (مرتجعات، صرفيات، إغلاق شفتات) خلال الفترة المحددة.</div>`;
+
+  out.querySelectorAll('.cc-row').forEach((tr) => {
+    tr.addEventListener('click', () => renderCashierControlTimeline(tr.dataset.cashierId, tr.dataset.cashierName, from, to));
+  });
+
+  renderExportButtons('ccExportBtns', () => ({
+    title: 'تقرير رقابة الكاشير', subtitle: `من ${from} إلى ${to}`,
+    columns: [
+      { key: 'cashierName', label: 'الكاشير' }, { key: 'salesCount', label: 'عدد المبيعات' }, { key: 'salesTotal', label: 'إجمالي المبيعات' },
+      { key: 'returnsCount', label: 'عدد المرتجعات' }, { key: 'returnsTotal', label: 'إجمالي المرتجعات' }, { key: 'returnRatioPct', label: 'نسبة المرتجعات %' },
+      { key: 'loyaltyDiscountTotal', label: 'خصم نقاط الولاء' }, { key: 'creditSalesCount', label: 'عدد المبيعات الآجلة' }, { key: 'creditSalesTotal', label: 'قيمة المبيعات الآجلة' },
+      { key: 'disbApprovedCount', label: 'صرفيات معتمدة (عدد)' }, { key: 'disbApprovedTotal', label: 'صرفيات معتمدة (قيمة)' }, { key: 'disbRejectedCount', label: 'صرفيات مرفوضة' },
+      { key: 'shiftsCount', label: 'عدد الشفتات' }, { key: 'cashVarianceTotal', label: 'إجمالي فرق النقدية' }, { key: 'networkVarianceTotal', label: 'إجمالي فرق الشبكة' },
+      { key: 'flags', label: 'ملاحظات رقابية' },
+    ],
+    rows: data.rows.map((r) => ({
+      cashierName: r.cashierName, salesCount: r.salesCount, salesTotal: r.salesTotal.toFixed(2),
+      returnsCount: r.returnsCount, returnsTotal: r.returnsTotal.toFixed(2), returnRatioPct: r.returnRatioPct.toFixed(1),
+      loyaltyDiscountTotal: r.loyaltyDiscountTotal.toFixed(2), creditSalesCount: r.creditSalesCount, creditSalesTotal: r.creditSalesTotal.toFixed(2),
+      disbApprovedCount: r.disbApprovedCount, disbApprovedTotal: r.disbApprovedTotal.toFixed(2), disbRejectedCount: r.disbRejectedCount,
+      shiftsCount: r.shiftsCount, cashVarianceTotal: r.cashVarianceTotal.toFixed(2), networkVarianceTotal: r.networkVarianceTotal.toFixed(2),
+      flags: r.flags.join(' | ') || '-',
+    })),
+  }));
+}
+
+const CC_EVENT_TYPE_LABELS = { return: 'مردود', disbursement: 'صرف نقدي', shift_close: 'إغلاق شفت' };
+async function renderCashierControlTimeline(cashierId, cashierName, from, to) {
+  const wrap = document.getElementById('ccTimelineWrap');
+  const title = document.getElementById('ccTimelineTitle');
+  const out = document.getElementById('ccTimelineOutput');
+  wrap.style.display = 'block';
+  title.textContent = `السجل التفصيلي — ${cashierName}`;
+  out.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
+  const data = await Api.get(`/reports/cashier-control/${cashierId}/timeline?from=${from}&to=${to}`);
+  if (data.events.length === 0) { out.innerHTML = '<div class="empty-note">لا توجد أحداث رقابية لهذا الكاشير في الفترة المحددة</div>'; return; }
+  out.innerHTML = `<table><thead><tr><th>التاريخ والوقت</th><th>النوع</th><th>التفاصيل</th></tr></thead><tbody>
+    ${data.events.map((e) => `<tr><td class="mono">${new Date(e.at).toLocaleString('ar-SA')}</td><td><span class="badge">${CC_EVENT_TYPE_LABELS[e.type] || e.type}</span></td><td>${escapeHtml(e.description)}</td></tr>`).join('')}
+  </tbody></table>`;
+}

@@ -256,4 +256,147 @@ router.get('/pos-daily-closing', asyncHandler(async (req, res) => {
   });
 }));
 
+// ---------- Cashier control/audit report: surfaces signals that may indicate manipulation ----------
+const RETURN_RATIO_FLAG = 0.15; // 15% of sales value returned by the same cashier is worth a look
+router.get('/cashier-control', asyncHandler(async (req, res) => {
+  const { from, to } = req.query;
+
+  const { rows: cashiers } = await pool.query(
+    `SELECT se.id, se.name FROM subledger_entities se
+     JOIN accounts a ON a.id = se.control_account_id
+     WHERE a.code = '1000' AND se.is_active ORDER BY se.name`
+  );
+
+  const { rows: invoiceAgg } = await pool.query(
+    `SELECT cashier_id,
+       COUNT(*) FILTER (WHERE doc_type = 'sale') AS sales_count,
+       COALESCE(SUM(total) FILTER (WHERE doc_type = 'sale'), 0)::numeric AS sales_total,
+       COUNT(*) FILTER (WHERE doc_type = 'credit_note') AS returns_count,
+       COALESCE(SUM(total) FILTER (WHERE doc_type = 'credit_note'), 0)::numeric AS returns_total,
+       COALESCE(SUM(loyalty_discount) FILTER (WHERE doc_type = 'sale'), 0)::numeric AS loyalty_discount_total,
+       COUNT(*) FILTER (WHERE doc_type = 'sale' AND pay_method_label = 'آجل — عميل') AS credit_sales_count,
+       COALESCE(SUM(total) FILTER (WHERE doc_type = 'sale' AND pay_method_label = 'آجل — عميل'), 0)::numeric AS credit_sales_total
+     FROM pos_invoices
+     WHERE ($1::date IS NULL OR business_date >= $1) AND ($2::date IS NULL OR business_date <= $2)
+     GROUP BY cashier_id`,
+    [from || null, to || null]
+  );
+
+  const { rows: disbAgg } = await pool.query(
+    `SELECT cashier_id,
+       COUNT(*) FILTER (WHERE status = 'approved') AS disb_approved_count,
+       COALESCE(SUM(amount) FILTER (WHERE status = 'approved'), 0)::numeric AS disb_approved_total,
+       COUNT(*) FILTER (WHERE status = 'rejected') AS disb_rejected_count,
+       COUNT(*) FILTER (WHERE status = 'pending') AS disb_pending_count
+     FROM cash_disbursements
+     WHERE ($1::date IS NULL OR requested_at::date >= $1) AND ($2::date IS NULL OR requested_at::date <= $2)
+     GROUP BY cashier_id`,
+    [from || null, to || null]
+  );
+
+  const { rows: shiftAgg } = await pool.query(
+    `SELECT cashier_id,
+       COUNT(*) AS shifts_count,
+       COALESCE(SUM(variance), 0)::numeric AS cash_variance_total,
+       COALESCE(SUM(CASE WHEN variance < 0 THEN variance ELSE 0 END), 0)::numeric AS cash_shortage_total,
+       COUNT(*) FILTER (WHERE variance <> 0) AS cash_variance_flags,
+       COALESCE(SUM(network_variance), 0)::numeric AS network_variance_total,
+       COUNT(*) FILTER (WHERE network_variance <> 0) AS network_variance_flags
+     FROM cashier_shifts
+     WHERE status = 'closed' AND ($1::date IS NULL OR business_date >= $1) AND ($2::date IS NULL OR business_date <= $2)
+     GROUP BY cashier_id`,
+    [from || null, to || null]
+  );
+
+  const invById = new Map(invoiceAgg.map((r) => [r.cashier_id, r]));
+  const disbById = new Map(disbAgg.map((r) => [r.cashier_id, r]));
+  const shiftById = new Map(shiftAgg.map((r) => [r.cashier_id, r]));
+
+  const rows = cashiers.map((c) => {
+    const inv = invById.get(c.id) || {};
+    const disb = disbById.get(c.id) || {};
+    const shift = shiftById.get(c.id) || {};
+    const salesTotal = Number(inv.sales_total || 0);
+    const returnsTotal = Number(inv.returns_total || 0);
+    const returnRatio = salesTotal > 0 ? returnsTotal / salesTotal : 0;
+    const cashShortageTotal = Number(shift.cash_shortage_total || 0);
+    const flags = [];
+    if (returnRatio > RETURN_RATIO_FLAG) flags.push(`نسبة مرتجعات مرتفعة (${(returnRatio * 100).toFixed(0)}%)`);
+    if (cashShortageTotal < 0) flags.push(`عجز نقدي متراكم (${cashShortageTotal.toFixed(2)} ر.س)`);
+    if (Number(disb.disb_rejected_count || 0) > 0) flags.push(`${disb.disb_rejected_count} طلب صرف مرفوض`);
+    if (Number(shift.network_variance_flags || 0) > 0) flags.push(`${shift.network_variance_flags} فرق في الشبكة`);
+
+    return {
+      cashierId: c.id,
+      cashierName: c.name,
+      salesCount: Number(inv.sales_count || 0),
+      salesTotal,
+      returnsCount: Number(inv.returns_count || 0),
+      returnsTotal,
+      returnRatioPct: returnRatio * 100,
+      loyaltyDiscountTotal: Number(inv.loyalty_discount_total || 0),
+      creditSalesCount: Number(inv.credit_sales_count || 0),
+      creditSalesTotal: Number(inv.credit_sales_total || 0),
+      disbApprovedCount: Number(disb.disb_approved_count || 0),
+      disbApprovedTotal: Number(disb.disb_approved_total || 0),
+      disbRejectedCount: Number(disb.disb_rejected_count || 0),
+      disbPendingCount: Number(disb.disb_pending_count || 0),
+      shiftsCount: Number(shift.shifts_count || 0),
+      cashVarianceTotal: Number(shift.cash_variance_total || 0),
+      cashShortageTotal,
+      cashVarianceFlags: Number(shift.cash_variance_flags || 0),
+      networkVarianceTotal: Number(shift.network_variance_total || 0),
+      networkVarianceFlags: Number(shift.network_variance_flags || 0),
+      flags,
+    };
+  });
+
+  res.json({ from: from || null, to: to || null, rows });
+}));
+
+// ---------- Cashier control report: chronological drill-down for one cashier ----------
+router.get('/cashier-control/:cashierId/timeline', asyncHandler(async (req, res) => {
+  const { cashierId } = req.params;
+  const { from, to } = req.query;
+
+  const { rows: returns } = await pool.query(
+    `SELECT inv.id, inv.issued_at AS at, inv.number, inv.total, orig.number AS original_number
+     FROM pos_invoices inv LEFT JOIN pos_invoices orig ON orig.id = inv.original_invoice_id
+     WHERE inv.cashier_id = $1 AND inv.doc_type = 'credit_note'
+       AND ($2::date IS NULL OR inv.business_date >= $2) AND ($3::date IS NULL OR inv.business_date <= $3)`,
+    [cashierId, from || null, to || null]
+  );
+  const { rows: disbursements } = await pool.query(
+    `SELECT id, requested_at AS at, amount, description, status, rejection_reason
+     FROM cash_disbursements
+     WHERE cashier_id = $1
+       AND ($2::date IS NULL OR requested_at::date >= $2) AND ($3::date IS NULL OR requested_at::date <= $3)`,
+    [cashierId, from || null, to || null]
+  );
+  const { rows: shifts } = await pool.query(
+    `SELECT id, closed_at AS at, opening_float, counted_amount, expected_amount, variance, network_counted, network_expected, network_variance
+     FROM cashier_shifts
+     WHERE cashier_id = $1 AND status = 'closed'
+       AND ($2::date IS NULL OR business_date >= $2) AND ($3::date IS NULL OR business_date <= $3)`,
+    [cashierId, from || null, to || null]
+  );
+
+  const events = [
+    ...returns.map((r) => ({
+      type: 'return', at: r.at,
+      description: `مردود بقيمة ${Number(r.total).toFixed(2)} ر.س على الفاتورة #${r.original_number || '—'} (مردود #${r.number})`,
+    })),
+    ...disbursements.map((d) => ({
+      type: 'disbursement', at: d.at,
+      description: `طلب صرف ${Number(d.amount).toFixed(2)} ر.س — ${d.description}${d.status === 'rejected' ? ` (مرفوض: ${d.rejection_reason || ''})` : ` (${d.status === 'approved' ? 'معتمد' : 'معلّق'})`}`,
+    })),
+    ...shifts.map((s) => ({
+      type: 'shift_close', at: s.at,
+      description: `إغلاق شفت — فرق نقدي ${Number(s.variance).toFixed(2)} ر.س، فرق شبكة ${Number(s.network_variance).toFixed(2)} ر.س`,
+    })),
+  ].sort((a, b) => new Date(a.at) - new Date(b.at));
+
+  res.json({ events });
+}));
+
 module.exports = router;

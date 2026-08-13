@@ -122,6 +122,7 @@ function openAccountingSub(subKey) {
   if (subKey === 'ledger') { populateLedgerAccounts(); }
   if (subKey === 'trial') renderTrialBalance();
   if (subKey === 'statements') renderStatements();
+  if (subKey === 'cashier-control') renderCashierControl();
 }
 document.querySelectorAll('#accountingSubnav button').forEach((btn) => btn.addEventListener('click', () => openAccountingSub(btn.dataset.view)));
 
