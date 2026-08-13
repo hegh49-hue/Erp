@@ -8,7 +8,9 @@ async function initPosDisbursements() {
   const isReviewer = currentUser.role === 'admin' || currentUser.role === 'accountant';
   document.getElementById('disbCreateCard').style.display = currentUser.role === 'accountant' ? 'none' : 'block';
   document.getElementById('disbListTitle').textContent = isReviewer ? 'كل الطلبات' : 'طلباتي';
+  document.getElementById('shiftItemsClassifyWrap').style.display = isReviewer ? 'block' : 'none';
   await renderDisbursementsList();
+  if (isReviewer) await renderShiftItemsClassifyList();
 }
 
 document.getElementById('disbCreateBtn').onclick = async () => {
@@ -31,7 +33,8 @@ async function renderDisbursementsList() {
   const wrap = document.getElementById('disbList');
   wrap.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
   const isReviewer = currentUser.role === 'admin' || currentUser.role === 'accountant';
-  const list = isReviewer ? await Api.get('/disbursements') : await Api.get('/disbursements/mine/' + currentUser.cashierEntityId);
+  const fullList = isReviewer ? await Api.get('/disbursements') : await Api.get('/disbursements/mine/' + currentUser.cashierEntityId);
+  const list = fullList.filter((d) => !d.shift_id);
   if (list.length === 0) { wrap.innerHTML = '<div class="empty-note">لا توجد طلبات بعد</div>'; return; }
   if (isReviewer) await loadAccounts();
   wrap.innerHTML = '';
@@ -68,6 +71,80 @@ async function renderDisbursementsList() {
       const reason = prompt('سبب الرفض:');
       if (!reason) return;
       try { await Api.post(`/disbursements/${d.id}/reject`, { reason }); renderDisbursementsList(); } catch (err) { alert(err.message); }
+    };
+    wrap.appendChild(card);
+  });
+}
+
+const DISB_SHIFT_ITEM_TYPE_LABELS = { expense: 'مصروف', purchase: 'مشتريات' };
+let cachedSupervisors = [];
+async function loadSupervisors() {
+  await loadAccounts();
+  const acc1500 = cachedAccounts.find((a) => a.code === '1500');
+  if (!acc1500) { cachedSupervisors = []; return; }
+  const res = await Api.get('/subledger/' + acc1500.id);
+  cachedSupervisors = res.entities || [];
+}
+async function renderShiftItemsClassifyList() {
+  const wrap = document.getElementById('shiftItemsClassifyList');
+  wrap.innerHTML = '<div class="empty-note">جارٍ التحميل...</div>';
+  const [fullList] = await Promise.all([Api.get('/disbursements?status=awaiting_classification'), loadAccounts(), loadSupervisors()]);
+  const list = fullList.filter((d) => d.shift_id);
+  if (list.length === 0) { wrap.innerHTML = '<div class="empty-note">لا توجد بنود بانتظار التصنيف</div>'; return; }
+  wrap.innerHTML = '';
+  list.forEach((d) => {
+    const card = document.createElement('div');
+    card.className = 'entry-card';
+    const typeBadge = `<span class="badge">${DISB_SHIFT_ITEM_TYPE_LABELS[d.item_type] || d.item_type}</span>`;
+    const supervisorOptions = cachedSupervisors.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')
+      || '<option value="">لا يوجد مشرفون مضافون بعد</option>';
+    card.innerHTML = `<div class="entry-head" style="cursor:default;">
+      <div class="eh-left"><span class="eh-desc">${escapeHtml(d.description)}</span>${typeBadge}</div>
+      <span class="eh-total mono">${money(d.amount)}</span></div>
+      <div style="padding:0 16px 14px 16px; font-size:12.5px; color:var(--muted);">${escapeHtml(d.cashier_name)} — ${new Date(d.requested_at).toLocaleString('ar-SA')}</div>
+      <div style="padding:0 16px 14px 16px; display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="display:flex; gap:6px; align-items:center;">
+          <label style="font-size:12.5px;"><input type="radio" name="cls-${d.id}" class="cls-resolution" value="account" checked> ترحيل كحساب محاسبي</label>
+          <select class="cls-account-select" style="min-width:180px;">${cachedAccounts.map((a) => `<option value="${a.id}">${escapeHtml(a.code)} - ${escapeHtml(a.name)}</option>`).join('')}</select>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <label style="font-size:12.5px;"><input type="radio" name="cls-${d.id}" class="cls-resolution" value="supervisor"> تحميل على حساب مشرف (غير مبرَّر)</label>
+          <select class="cls-supervisor-select" style="min-width:180px;" disabled>${supervisorOptions}</select>
+          <button type="button" class="btn btn-outline btn-sm cls-add-supervisor">+ مشرف جديد</button>
+        </div>
+        <button class="btn btn-blue btn-sm cls-confirm-btn">تأكيد التصنيف</button>
+      </div>`;
+    card.querySelectorAll('.cls-resolution').forEach((r) => r.addEventListener('change', () => {
+      const resolution = card.querySelector('.cls-resolution:checked').value;
+      card.querySelector('.cls-account-select').disabled = resolution !== 'account';
+      card.querySelector('.cls-supervisor-select').disabled = resolution !== 'supervisor';
+    }));
+    card.querySelector('.cls-add-supervisor').onclick = async () => {
+      const name = prompt('اسم المشرف الجديد:');
+      if (!name || !name.trim()) return;
+      try {
+        const acc1500 = cachedAccounts.find((a) => a.code === '1500');
+        const code = 'SUP-' + Date.now().toString().slice(-6);
+        const created = await Api.post('/subledger/' + acc1500.id, { code, name: name.trim() });
+        cachedSupervisors.push(created);
+        const sel = card.querySelector('.cls-supervisor-select');
+        sel.innerHTML = cachedSupervisors.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+        sel.value = created.id;
+        card.querySelector('input[value="supervisor"]').checked = true;
+        card.querySelector('.cls-account-select').disabled = true;
+        sel.disabled = false;
+      } catch (err) { alert(err.message); }
+    };
+    card.querySelector('.cls-confirm-btn').onclick = async () => {
+      const resolution = card.querySelector('.cls-resolution:checked').value;
+      const body = { resolution };
+      if (resolution === 'account') body.expenseAccountId = card.querySelector('.cls-account-select').value;
+      else {
+        const supervisorEntityId = card.querySelector('.cls-supervisor-select').value;
+        if (!supervisorEntityId) { alert('يرجى اختيار المشرف أو إضافة مشرف جديد'); return; }
+        body.supervisorEntityId = supervisorEntityId;
+      }
+      try { await Api.post(`/disbursements/${d.id}/classify`, body); renderShiftItemsClassifyList(); } catch (err) { alert(err.message); }
     };
     wrap.appendChild(card);
   });

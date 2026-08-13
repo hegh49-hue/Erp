@@ -457,7 +457,7 @@ async function initPosShifts() {
 document.getElementById('shCashierSelect').addEventListener('change', refreshShiftsView);
 async function refreshShiftsView() {
   const cashierId = document.getElementById('shCashierSelect').value;
-  if (!cashierId) { document.getElementById('shCurrentShift').innerHTML = '<div class="empty-note">أضف كاشيراً أولاً من فاتورة المبيعات</div>'; document.getElementById('shHistoryList').innerHTML = ''; return; }
+  if (!cashierId) { document.getElementById('shCurrentShift').innerHTML = '<div class="empty-note">أضف كاشيراً أولاً من نقطة البيع</div>'; document.getElementById('shHistoryList').innerHTML = ''; return; }
   await Promise.all([renderCurrentShift(cashierId), renderShiftsHistory(cashierId)]);
 }
 
@@ -485,31 +485,36 @@ async function renderCurrentShift(cashierId) {
     return;
   }
   const denominations = companyCache?.currency_denominations || [500, 200, 100, 50, 20, 10, 5, 1, 0.5, 0.25];
-  const disb = shift.live.disbursements || [];
-  const disbHtml = disb.length
-    ? `<table style="margin-top:10px;"><thead><tr><th>الوصف</th><th>المبلغ</th><th>المرفق</th></tr></thead><tbody>
-        ${disb.map((d) => `<tr><td>${escapeHtml(d.description)}</td><td class="mono">${money(d.amount)}</td><td>${d.receipt_attachment ? `<a href="${d.receipt_attachment}" target="_blank">عرض</a>` : '-'}</td></tr>`).join('')}
-       </tbody></table>`
-    : '<div class="empty-note">لا توجد مصروفات معتمدة خلال هذا الشفت</div>';
 
   wrap.innerHTML = `
     <div class="form-card">
       <div class="panel-header" style="margin-bottom:10px;"><h2 style="font-size:15px;">شفت مفتوح منذ ${new Date(shift.opened_at).toLocaleString('ar-SA')}</h2><span class="badge">${escapeHtml(shift.cashier_name)}</span></div>
-      <div class="stat-cards">
-        <div class="stat-card"><div class="label">الرصيد الافتتاحي</div><div class="value mono">${money(shift.opening_float)}</div></div>
-        <div class="stat-card"><div class="label">صافي المبيعات النقدية</div><div class="value mono">${money(shift.live.netCashSales)}</div></div>
-        <div class="stat-card"><div class="label">مصروفات معتمدة خلال الشفت</div><div class="value mono">${money(shift.live.disbursementsTotal)}</div></div>
-        <div class="stat-card"><div class="label">الرصيد النقدي المتوقع الآن</div><div class="value mono">${money(shift.live.cashExpected)}</div></div>
-        <div class="stat-card"><div class="label">صافي مبيعات الشبكة (متوقع)</div><div class="value mono">${money(shift.live.networkExpected)}</div></div>
-      </div>
-      <h3 style="font-size:13px; margin:14px 0 8px 0;">مصروفات نقدية معتمدة خلال الشفت</h3>
-      ${disbHtml}
-      <h3 style="font-size:13px; margin:14px 0 8px 0;">عدّ النقدية حسب الفئة</h3>
+
+      <h3 style="font-size:13px; margin:6px 0 8px 0;">1. رصيد العهدة النقدية (الافتتاحي)</h3>
+      <div class="stat-cards"><div class="stat-card"><div class="label">مُدخل عند فتح الشفت — للعرض فقط، غير مُدرج في حساب الفارق أدناه</div><div class="value mono">${money(shift.opening_float)}</div></div></div>
+
+      <h3 style="font-size:13px; margin:14px 0 8px 0;">2. عدّ النقدية حسب الفئة</h3>
       <div id="shDenomRows"></div>
       <div class="lines-total"><span>إجمالي المعدود نقداً</span><span class="mono" id="shDenomSum">0.00</span></div>
-      <div class="field" style="margin-top:10px;"><label>مبلغ الشبكة الفعلي (من كشف جهاز الشبكة)</label><input id="shNetworkCounted" type="number" step="0.01" placeholder="0.00"></div>
-      <div class="field"><label>ملاحظة</label><input id="shCloseNote" placeholder="اختياري"></div>
-      <button class="btn btn-primary" id="shCloseBtn" style="width:100%;">إغلاق الشفت</button>
+
+      <h3 style="font-size:13px; margin:14px 0 8px 0;">3. الشبكة</h3>
+      <div class="field"><label>مبلغ الشبكة الفعلي (من كشف جهاز الشبكة)</label><input id="shNetworkCounted" type="number" step="0.01" placeholder="0.00"></div>
+
+      <h3 style="font-size:13px; margin:14px 0 8px 0;">4. التحويلات البنكية</h3>
+      <div class="field"><label>مبيعات محصَّلة عبر تحويل بنكي مباشر لهذا الشفت (إن وُجدت)</label><input id="shTransfersAmount" type="number" step="0.01" placeholder="0.00" value="0"></div>
+
+      <h3 style="font-size:13px; margin:14px 0 8px 0;">5. المصروفات والمشتريات</h3>
+      <div id="shExpenseRows"></div>
+      <button class="btn btn-outline btn-sm" id="shAddExpenseBtn" style="margin-top:6px;">+ إضافة بند</button>
+      <div class="lines-total"><span>إجمالي المصروفات والمشتريات</span><span class="mono" id="shExpenseSum">0.00</span></div>
+
+      <div class="stat-cards" style="margin-top:14px;">
+        <div class="stat-card"><div class="label">6. الإجمالي (نقد + شبكة + تحويلات − مصروفات/مشتريات)</div><div class="value mono" id="shTotalCounted">0.00</div></div>
+        <div class="stat-card"><div class="label">7. إجمالي المبيعات النقدية من النظام (حتى الآن)</div><div class="value mono">${money(shift.live.systemNetSales)}</div></div>
+      </div>
+
+      <div class="field" style="margin-top:10px;"><label>ملاحظة</label><input id="shCloseNote" placeholder="اختياري"></div>
+      <button class="btn btn-primary" id="shCloseBtn" style="width:100%; margin-top:6px;">إغلاق الشفت وتصفيته</button>
       <div id="shCloseMsg" class="msg" style="display:none;"></div>
     </div>`;
 
@@ -520,31 +525,67 @@ async function renderCurrentShift(cashierId) {
       <input class="denom-qty-input mono" data-value="${v}" type="number" min="0" step="1" value="0" style="flex:1;">
       <span class="mono denom-line-total" style="flex:1;">0.00</span>
     </div>`).join('');
-  function updateDenomSum() {
-    let sum = 0;
+
+  const expenseRows = document.getElementById('shExpenseRows');
+  function addExpenseRow() {
+    const row = document.createElement('div');
+    row.className = 'line-row';
+    row.innerHTML = `
+      <input class="sh-exp-desc" placeholder="الوصف" style="flex:2;">
+      <select class="sh-exp-type" style="flex:1;"><option value="expense">مصروف</option><option value="purchase">مشتريات</option></select>
+      <input class="sh-exp-amount mono" type="number" min="0" step="0.01" value="0" style="flex:1;">
+      <button type="button" class="sh-exp-remove" style="flex:0;">✕</button>`;
+    row.querySelector('.sh-exp-amount').addEventListener('input', updateTotals);
+    row.querySelector('.sh-exp-remove').onclick = () => { row.remove(); updateTotals(); };
+    expenseRows.appendChild(row);
+  }
+  document.getElementById('shAddExpenseBtn').onclick = addExpenseRow;
+
+  function updateTotals() {
+    let denomSum = 0;
     denomRows.querySelectorAll('.denom-qty-input').forEach((inp) => {
       const value = Number(inp.dataset.value);
       const qty = Number(inp.value) || 0;
       const lineTotal = value * qty;
-      sum += lineTotal;
+      denomSum += lineTotal;
       inp.closest('.line-row').querySelector('.denom-line-total').textContent = lineTotal.toFixed(2);
     });
-    document.getElementById('shDenomSum').textContent = sum.toFixed(2);
-    return sum;
+    document.getElementById('shDenomSum').textContent = denomSum.toFixed(2);
+
+    let expenseSum = 0;
+    expenseRows.querySelectorAll('.sh-exp-amount').forEach((inp) => { expenseSum += Number(inp.value) || 0; });
+    document.getElementById('shExpenseSum').textContent = expenseSum.toFixed(2);
+
+    const networkCounted = Number(document.getElementById('shNetworkCounted').value) || 0;
+    const transfersAmount = Number(document.getElementById('shTransfersAmount').value) || 0;
+    const totalCounted = denomSum + networkCounted + transfersAmount - expenseSum;
+    document.getElementById('shTotalCounted').textContent = totalCounted.toFixed(2);
+    return { denomSum, expenseSum, networkCounted, transfersAmount, totalCounted };
   }
-  denomRows.querySelectorAll('.denom-qty-input').forEach((inp) => inp.addEventListener('input', updateDenomSum));
-  updateDenomSum();
+  denomRows.querySelectorAll('.denom-qty-input').forEach((inp) => inp.addEventListener('input', updateTotals));
+  document.getElementById('shNetworkCounted').addEventListener('input', updateTotals);
+  document.getElementById('shTransfersAmount').addEventListener('input', updateTotals);
+  updateTotals();
 
   document.getElementById('shCloseBtn').onclick = async () => {
     const denomValues = {};
     denomRows.querySelectorAll('.denom-qty-input').forEach((inp) => { denomValues[inp.dataset.value] = Number(inp.value) || 0; });
     const networkCounted = document.getElementById('shNetworkCounted').value;
+    const transfersAmount = document.getElementById('shTransfersAmount').value;
     const note = document.getElementById('shCloseNote').value.trim();
     const msg = document.getElementById('shCloseMsg');
     if (networkCounted === '') { alert('أدخل مبلغ الشبكة الفعلي'); return; }
+    const expenseItems = [...expenseRows.querySelectorAll('.line-row')].map((row) => ({
+      description: row.querySelector('.sh-exp-desc').value.trim(),
+      itemType: row.querySelector('.sh-exp-type').value,
+      amount: parseFloat(row.querySelector('.sh-exp-amount').value) || 0,
+    })).filter((it) => it.amount > 0);
+    if (expenseItems.some((it) => !it.description)) { alert('يرجى إدخال وصف لكل بند مصروفات/مشتريات'); return; }
     if (!confirm('إغلاق الشفت نهائي ولا يمكن التراجع عنه. متابعة؟')) return;
     try {
-      const closed = await Api.post(`/pos/shifts/${shift.id}/close`, { denominations: denomValues, networkCounted: parseFloat(networkCounted), note });
+      const closed = await Api.post(`/pos/shifts/${shift.id}/close`, {
+        denominations: denomValues, networkCounted: parseFloat(networkCounted), transfersAmount: parseFloat(transfersAmount) || 0, expenseItems, note,
+      });
       renderShiftReport(closed);
       refreshShiftsView();
     } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; msg.style.display = 'block'; }
@@ -554,35 +595,48 @@ async function renderCurrentShift(cashierId) {
 function varianceColorOf(v) { return Number(v) === 0 ? 'var(--green)' : (Number(v) > 0 ? 'var(--blue)' : 'var(--stamp)'); }
 function varianceLabelOf(v) { return Number(v) === 0 ? 'مطابق تماماً' : (Number(v) > 0 ? 'زيادة' : 'عجز'); }
 
+const SHIFT_ITEM_TYPE_LABELS = { expense: 'مصروف', purchase: 'مشتريات' };
+const SHIFT_CLASSIFICATION_LABELS = { awaiting_classification: 'بانتظار التصنيف', classified: 'مصنَّف' };
 function renderShiftReport(shift) {
   const denominations = shift.denominations || {};
   const denomRowsHtml = Object.entries(denominations).filter(([, qty]) => Number(qty) > 0)
     .map(([value, qty]) => `<tr><td>فئة ${value} ر.س</td><td class="mono">${qty}</td><td class="mono">${(Number(value) * Number(qty)).toFixed(2)}</td></tr>`).join('')
     || '<tr><td colspan="3" class="empty-note">لا يوجد تفصيل فئات</td></tr>';
-  const disb = shift.disbursementsList || [];
-  const disbRowsHtml = disb.length
-    ? disb.map((d) => `<tr><td>${escapeHtml(d.description)}</td><td class="mono">${money(d.amount)}</td><td>${d.receipt_attachment ? `<a href="${d.receipt_attachment}" target="_blank">عرض</a>` : '-'}</td></tr>`).join('')
-    : '<tr><td colspan="3" class="empty-note">لا توجد مصروفات معتمدة خلال هذا الشفت</td></tr>';
+  const items = shift.expense_items || [];
+  const classification = shift.expenseItemsClassification || [];
+  const itemsRowsHtml = items.length
+    ? items.map((it, idx) => {
+        const cls = classification[idx];
+        const clsHtml = cls
+          ? `<span class="badge ${cls.status === 'classified' ? '' : 'warn'}">${SHIFT_CLASSIFICATION_LABELS[cls.status] || cls.status}${cls.status === 'classified' ? ' — ' + (cls.supervisor_name ? 'حُمِّل على ' + escapeHtml(cls.supervisor_name) : escapeHtml(cls.expense_account_code || '') + ' ' + escapeHtml(cls.expense_account_name || '')) : ''}</span>`
+          : '';
+        return `<tr><td>${escapeHtml(it.description)}</td><td>${SHIFT_ITEM_TYPE_LABELS[it.itemType] || it.itemType}</td><td class="mono">${money(it.amount)}</td><td>${clsHtml}</td></tr>`;
+      }).join('')
+    : '<tr><td colspan="4" class="empty-note">لا توجد بنود مصروفات أو مشتريات لهذا الشفت</td></tr>';
   const html = `
     <div class="printable-report">
       <h3 style="margin:0 0 4px 0;">تقرير تصفية شفت — ${escapeHtml(shift.cashier_name)}</h3>
       <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">من ${new Date(shift.opened_at).toLocaleString('ar-SA')} إلى ${new Date(shift.closed_at).toLocaleString('ar-SA')}</div>
-      <h3 style="font-size:13px; margin:10px 0 6px 0;">النقدية</h3>
-      <div class="stat-cards">
-        <div class="stat-card"><div class="label">الرصيد الافتتاحي</div><div class="value mono">${money(shift.opening_float)}</div></div>
-        <div class="stat-card"><div class="label">الرصيد النقدي المتوقع</div><div class="value mono">${money(shift.expected_amount)}</div></div>
-        <div class="stat-card"><div class="label">المعدود فعلياً</div><div class="value mono">${money(shift.counted_amount)}</div></div>
-        <div class="stat-card"><div class="label">فرق النقدية</div><div class="value mono" style="color:${varianceColorOf(shift.variance)};">${money(shift.variance)} (${varianceLabelOf(shift.variance)})</div></div>
-      </div>
+
+      <h3 style="font-size:13px; margin:10px 0 6px 0;">1. رصيد العهدة النقدية (الافتتاحي — للعرض فقط)</h3>
+      <div class="stat-cards"><div class="stat-card"><div class="value mono">${money(shift.opening_float)}</div></div></div>
+
+      <h3 style="font-size:13px; margin:14px 0 6px 0;">2. عدّ النقدية حسب الفئة</h3>
       <table><thead><tr><th>الفئة</th><th>العدد</th><th>الإجمالي</th></tr></thead><tbody>${denomRowsHtml}</tbody></table>
-      <h3 style="font-size:13px; margin:14px 0 6px 0;">الشبكة</h3>
-      <div class="stat-cards">
-        <div class="stat-card"><div class="label">المتوقع من النظام</div><div class="value mono">${money(shift.network_expected)}</div></div>
-        <div class="stat-card"><div class="label">الفعلي من كشف الجهاز</div><div class="value mono">${money(shift.network_counted)}</div></div>
-        <div class="stat-card"><div class="label">فرق الشبكة</div><div class="value mono" style="color:${varianceColorOf(shift.network_variance)};">${money(shift.network_variance)} (${varianceLabelOf(shift.network_variance)})</div></div>
+
+      <div class="stat-cards" style="margin-top:10px;">
+        <div class="stat-card"><div class="label">3. الشبكة (فعلي)</div><div class="value mono">${money(shift.network_counted)}</div></div>
+        <div class="stat-card"><div class="label">4. التحويلات البنكية</div><div class="value mono">${money(shift.transfers_amount)}</div></div>
       </div>
-      <h3 style="font-size:13px; margin:14px 0 6px 0;">مصروفات نقدية معتمدة خلال الشفت (إجمالي ${money(shift.disbursements_total)})</h3>
-      <table><thead><tr><th>الوصف</th><th>المبلغ</th><th>المرفق</th></tr></thead><tbody>${disbRowsHtml}</tbody></table>
+
+      <h3 style="font-size:13px; margin:14px 0 6px 0;">5. المصروفات والمشتريات (إجمالي ${money(shift.disbursements_total)})</h3>
+      <table><thead><tr><th>الوصف</th><th>النوع</th><th>المبلغ</th><th>حالة التصنيف المحاسبي</th></tr></thead><tbody>${itemsRowsHtml}</tbody></table>
+
+      <div class="stat-cards" style="margin-top:14px;">
+        <div class="stat-card"><div class="label">6. الإجمالي (نقد + شبكة + تحويلات − مصروفات/مشتريات)</div><div class="value mono">${money(shift.counted_amount)}</div></div>
+        <div class="stat-card"><div class="label">7. إجمالي المبيعات النقدية من النظام</div><div class="value mono">${money(shift.expected_amount)}</div></div>
+        <div class="stat-card"><div class="label">8. الفارق</div><div class="value mono" style="color:${varianceColorOf(shift.variance)};">${money(shift.variance)} (${varianceLabelOf(shift.variance)})</div></div>
+      </div>
       ${shift.note ? `<div style="font-size:12.5px; color:var(--muted); margin-top:10px;">ملاحظة: ${escapeHtml(shift.note)}</div>` : ''}
     </div>
     <button class="btn btn-outline" id="shReportPrintBtn" style="margin-top:10px;">طباعة</button>`;

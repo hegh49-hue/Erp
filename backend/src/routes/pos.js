@@ -119,7 +119,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
           const componentQty = (comp.qty * qty) / bom.outputQty;
           const stock = await issueStock(client, {
             itemId: comp.componentItemId, warehouseId: effectiveWarehouseId, qty: componentQty,
-            moveDate: new Date().toISOString().slice(0, 10), note: `استهلاك وصفة — فاتورة مبيعات`,
+            moveDate: new Date().toISOString().slice(0, 10), note: `استهلاك وصفة — بيع نقاط البيع`,
             refType: 'pos_sale_bom', createdBy: req.user.id,
           });
           lineCost += stock.unitCost * componentQty;
@@ -129,7 +129,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
       } else if (item.is_stock_tracked) {
         const stock = await issueStock(client, {
           itemId: item.id, warehouseId: effectiveWarehouseId, qty, moveDate: new Date().toISOString().slice(0, 10),
-          note: 'فاتورة مبيعات', refType: 'pos_sale', createdBy: req.user.id,
+          note: 'بيع نقاط البيع', refType: 'pos_sale', createdBy: req.user.id,
         });
         unitCost = stock.unitCost;
         cogsTotal += unitCost * qty;
@@ -187,7 +187,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
 
     const revenueEntry = await postJournalEntry(client, {
       entryDate: businessDate,
-      description: `فاتورة مبيعات #${number}`,
+      description: `مبيعات نقاط البيع - فاتورة #${number}`,
       reference: number,
       sourceType: 'pos_sale',
       createdBy: req.user.id,
@@ -428,32 +428,17 @@ router.post('/invoices/:id/return', asyncHandler(async (req, res) => {
 }));
 
 // ---------- Cashier shifts (till reconciliation) ----------
-async function netSalesByMethod(client, { cashierId, payMethodLabel, fromTs, toTs }) {
+// "المبيعات النقدية" here means all immediately-collected payment methods (cash, card
+// network, bank transfer) as opposed to آجل (deferred/credit sales to a customer or an
+// external channel), which settle separately and never sit in the physical till.
+async function netImmediateSales(client, { cashierId, fromTs, toTs }) {
   const { rows } = await client.query(
     `SELECT COALESCE(SUM(CASE WHEN doc_type = 'sale' THEN total ELSE -total END), 0)::numeric AS net
      FROM pos_invoices
-     WHERE cashier_id = $1 AND pay_method_label = $2 AND issued_at >= $3 AND issued_at <= $4`,
-    [cashierId, payMethodLabel, fromTs, toTs]
-  );
-  return Number(rows[0].net);
-}
-async function getShiftDisbursements(client, { cashierId, fromTs, toTs }) {
-  const { rows } = await client.query(
-    `SELECT d.*, ea.code AS expense_account_code, ea.name AS expense_account_name
-     FROM cash_disbursements d LEFT JOIN accounts ea ON ea.id = d.expense_account_id
-     WHERE d.cashier_id = $1 AND d.status = 'approved' AND d.reviewed_at >= $2 AND d.reviewed_at <= $3
-     ORDER BY d.reviewed_at`,
+     WHERE cashier_id = $1 AND pay_method_label IN ('نقدي', 'شبكة', 'تحويل') AND issued_at >= $2 AND issued_at <= $3`,
     [cashierId, fromTs, toTs]
   );
-  return rows;
-}
-async function computeShiftFinancials(client, { cashierId, openingFloat, fromTs, toTs }) {
-  const netCashSales = await netSalesByMethod(client, { cashierId, payMethodLabel: 'نقدي', fromTs, toTs });
-  const netNetworkSales = await netSalesByMethod(client, { cashierId, payMethodLabel: 'شبكة', fromTs, toTs });
-  const disbursements = await getShiftDisbursements(client, { cashierId, fromTs, toTs });
-  const disbursementsTotal = disbursements.reduce((s, d) => s + Number(d.amount), 0);
-  const cashExpected = Number(openingFloat) + netCashSales - disbursementsTotal;
-  return { netCashSales, netNetworkSales, disbursements, disbursementsTotal, cashExpected, networkExpected: netNetworkSales };
+  return Number(rows[0].net);
 }
 
 router.get('/shifts', asyncHandler(async (req, res) => {
@@ -482,10 +467,8 @@ router.get('/shifts/open/:cashierId', asyncHandler(async (req, res) => {
     [cashierId]
   );
   if (!rows[0]) return res.json(null);
-  const financials = await computeShiftFinancials(pool, {
-    cashierId, openingFloat: rows[0].opening_float, fromTs: rows[0].opened_at, toTs: new Date(),
-  });
-  res.json({ ...rows[0], live: financials });
+  const systemNetSales = await netImmediateSales(pool, { cashierId, fromTs: rows[0].opened_at, toTs: new Date() });
+  res.json({ ...rows[0], live: { systemNetSales } });
 }));
 
 router.get('/shifts/:id', asyncHandler(async (req, res) => {
@@ -503,13 +486,18 @@ router.get('/shifts/:id', asyncHandler(async (req, res) => {
   if (!shift) throw new ApiError(404, 'شفت غير موجود');
   assertOwnCashier(req, shift.cashier_id);
   if (shift.status === 'open') {
-    shift.live = await computeShiftFinancials(pool, {
-      cashierId: shift.cashier_id, openingFloat: shift.opening_float, fromTs: shift.opened_at, toTs: new Date(),
-    });
+    const systemNetSales = await netImmediateSales(pool, { cashierId: shift.cashier_id, fromTs: shift.opened_at, toTs: new Date() });
+    shift.live = { systemNetSales };
   } else {
-    shift.disbursementsList = await getShiftDisbursements(pool, {
-      cashierId: shift.cashier_id, fromTs: shift.opened_at, toTs: shift.closed_at,
-    });
+    const { rows: classRows } = await pool.query(
+      `SELECT d.*, ea.code AS expense_account_code, ea.name AS expense_account_name, sup.name AS supervisor_name
+       FROM cash_disbursements d
+       LEFT JOIN accounts ea ON ea.id = d.expense_account_id
+       LEFT JOIN subledger_entities sup ON sup.id = d.supervisor_entity_id
+       WHERE d.shift_id = $1 ORDER BY d.requested_at`,
+      [id]
+    );
+    shift.expenseItemsClassification = classRows;
   }
   res.json(shift);
 }));
@@ -540,13 +528,23 @@ router.post('/shifts/open', asyncHandler(async (req, res) => {
 
 router.post('/shifts/:id/close', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { denominations, networkCounted, note } = req.body;
+  const { denominations, networkCounted, transfersAmount, expenseItems, note } = req.body;
   if (!denominations || typeof denominations !== 'object' || Object.keys(denominations).length === 0) {
     throw new ApiError(400, 'يرجى إدخال عدّ النقدية حسب الفئات');
   }
   const cashCounted = Object.entries(denominations).reduce((sum, [value, qty]) => sum + Number(value) * (Number(qty) || 0), 0);
   const netCounted = Number(networkCounted);
   if (!(netCounted >= 0)) throw new ApiError(400, 'يرجى إدخال مبلغ الشبكة الفعلي');
+  const transfers = Number(transfersAmount) || 0;
+  if (transfers < 0) throw new ApiError(400, 'مبلغ التحويلات لا يمكن أن يكون سالباً');
+  const items = Array.isArray(expenseItems) ? expenseItems : [];
+  for (const it of items) {
+    if (!it.description || !String(it.description).trim()) throw new ApiError(400, 'وصف بند المصروفات/المشتريات مطلوب');
+    if (!(Number(it.amount) > 0)) throw new ApiError(400, 'مبلغ كل بند مصروفات/مشتريات يجب أن يكون أكبر من صفر');
+    if (!['expense', 'purchase'].includes(it.itemType)) throw new ApiError(400, 'نوع البند يجب أن يكون مصروف أو مشتريات');
+  }
+  const expensesTotal = items.reduce((s, it) => s + Number(it.amount), 0);
+  const totalCounted = cashCounted + netCounted + transfers - expensesTotal;
 
   const result = await withTransaction(async (client) => {
     const { rows } = await client.query('SELECT * FROM cashier_shifts WHERE id = $1 FOR UPDATE', [id]);
@@ -555,19 +553,26 @@ router.post('/shifts/:id/close', asyncHandler(async (req, res) => {
     assertOwnCashier(req, shift.cashier_id);
     if (shift.status !== 'open') throw new ApiError(409, 'هذا الشفت مُغلق بالفعل');
     const now = new Date();
-    const financials = await computeShiftFinancials(client, {
-      cashierId: shift.cashier_id, openingFloat: shift.opening_float, fromTs: shift.opened_at, toTs: now,
-    });
-    const cashVariance = cashCounted - financials.cashExpected;
-    const networkVariance = netCounted - financials.networkExpected;
+    const systemNetSales = await netImmediateSales(client, { cashierId: shift.cashier_id, fromTs: shift.opened_at, toTs: now });
+    const variance = totalCounted - systemNetSales;
+
+    const normalizedItems = items.map((it) => ({ description: String(it.description).trim(), amount: Number(it.amount), itemType: it.itemType }));
     const { rows: updated } = await client.query(
       `UPDATE cashier_shifts SET status='closed', closed_at=$1, closed_by=$2, counted_amount=$3, expected_amount=$4, variance=$5, note=$6,
-         denominations=$7, network_counted=$8, network_expected=$9, network_variance=$10, disbursements_total=$11
+         denominations=$7, network_counted=$8, transfers_amount=$9, disbursements_total=$10, expense_items=$11
        WHERE id=$12 RETURNING *`,
-      [now, req.user.id, cashCounted, financials.cashExpected, cashVariance, note || null,
-        denominations, netCounted, financials.networkExpected, networkVariance, financials.disbursementsTotal, id]
+      [now, req.user.id, totalCounted, systemNetSales, variance, note || null,
+        denominations, netCounted, transfers, expensesTotal, JSON.stringify(normalizedItems), id]
     );
-    return { ...updated[0], disbursementsList: financials.disbursements };
+
+    for (const it of normalizedItems) {
+      await client.query(
+        `INSERT INTO cash_disbursements (cashier_id, amount, description, status, shift_id, item_type, requested_by)
+         VALUES ($1,$2,$3,'awaiting_classification',$4,$5,$6)`,
+        [shift.cashier_id, it.amount, it.description, id, it.itemType, req.user.id]
+      );
+    }
+    return updated[0];
   });
   res.json(result);
 }));
