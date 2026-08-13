@@ -36,7 +36,7 @@
   <nav id="appNav">
     <button class="active" data-app="home">🏠 الرئيسية</button>
     <button data-app="accounting">المحاسبة</button>
-    <button data-app="pos">نقاط البيع</button>
+    <button data-app="pos">فاتورة المبيعات</button>
     <button data-app="inventory">المخزون</button>
     <button data-app="settings">الإعدادات</button>
   </nav>
@@ -63,7 +63,7 @@
   <button data-invview="bom">وصفات التصنيع (BOM)</button>
 </div>
 <div class="subnav" id="posSubnav" style="display:none;">
-  <button class="active" data-possub="sell">نقطة البيع</button>
+  <button class="active" data-possub="sell">فاتورة المبيعات</button>
   <button data-possub="invoices">سجل الفواتير</button>
   <button data-possub="returns">مردودات المبيعات</button>
   <button data-possub="shifts">شفتات الكاشير</button>
@@ -86,7 +86,7 @@
       </div>
       <div class="app-card" data-open-app="pos">
         <div class="app-icon" style="background:var(--stamp-soft); color:var(--stamp);">🧾</div>
-        <div class="app-name">نقاط البيع</div>
+        <div class="app-name">فاتورة المبيعات</div>
         <div class="app-desc">بيع مباشر، فوترة QR، وقيد محاسبي تلقائي (إيراد + تكلفة بضاعة) لكل عملية بيع</div>
         <span class="app-status status-ready">جاهز للاستخدام</span>
       </div>
@@ -280,7 +280,7 @@
         <div class="field-row">
           <div class="field"><label>سعر البيع (شامل الضريبة)</label><input id="itPrice" type="number" step="0.01" placeholder="0.00"></div>
           <div class="field"><label>خاضع للضريبة؟</label><select id="itTaxable"><option value="yes">نعم — 15%</option><option value="no">لا</option></select></div>
-          <div class="field"><label>يُباع في نقاط البيع؟</label><select id="itSellable"><option value="yes">نعم</option><option value="no">لا (مادة خام)</option></select></div>
+          <div class="field"><label>يُباع عبر فاتورة المبيعات؟</label><select id="itSellable"><option value="yes">نعم</option><option value="no">لا (مادة خام)</option></select></div>
         </div>
         <button class="btn btn-blue" id="addItemBtn">إضافة صنف</button>
       </div>
@@ -403,7 +403,7 @@
       </div>
     </div>
     <div class="possub" id="pos-invoices" style="display:none; padding:22px 26px;">
-      <div class="panel-header"><h2>سجل فواتير نقاط البيع</h2><span class="mono" id="posInvSummary" style="color:var(--muted); font-size:12.5px;"></span></div>
+      <div class="panel-header"><h2>سجل فواتير المبيعات</h2><span class="mono" id="posInvSummary" style="color:var(--muted); font-size:12.5px;"></span></div>
       <table id="posInvTable">
         <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الكاشير</th><th>المستودع</th><th>الدفع</th><th>الإجمالي</th><th></th></tr></thead>
         <tbody id="posInvBody"></tbody>
@@ -486,7 +486,7 @@
     </div>
 
     <div class="possub" id="pos-settings" style="display:none; padding:22px 26px;">
-      <div class="panel-header"><h2>إعدادات نقاط البيع</h2></div>
+      <div class="panel-header"><h2>إعدادات فاتورة المبيعات</h2></div>
       <div class="subtabs">
         <button class="subtab-btn active" data-possetting="users">المستخدمون والصلاحيات</button>
         <button class="subtab-btn" data-possetting="items">الأصناف والوصفات</button>
@@ -506,7 +506,7 @@
               <select id="usrRole">
                 <option value="admin">مدير نظام (كل الصلاحيات)</option>
                 <option value="accountant">محاسب (المحاسبة والتقارير فقط)</option>
-                <option value="cashier">كاشير (نقطة البيع وشفته فقط)</option>
+                <option value="cashier">كاشير (فاتورة المبيعات وشفته فقط)</option>
               </select>
             </div>
             <div class="field" id="usrCashierNameWrap"><label>اسم صندوقه</label><input id="usrCashierName" placeholder="مثال: صندوق الكاشير الجديد"></div>
@@ -590,7 +590,7 @@
 
     <div class="form-card" style="max-width:640px;">
       <label style="display:block; font-size:13px; font-weight:800; margin-bottom:4px;">القنوات الخارجية (توصيل / دفع آجل / بوابات دفع)</label>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:14px; line-height:1.7;">أضف أي تطبيق توصيل أو خدمة دفع آجل أو بوابة دفع إلكتروني — يظهر تلقائياً كخيار دفع في نقاط البيع.</div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:14px; line-height:1.7;">أضف أي تطبيق توصيل أو خدمة دفع آجل أو بوابة دفع إلكتروني — يظهر تلقائياً كخيار دفع في فاتورة المبيعات.</div>
       <div class="field-row">
         <div class="field"><label>اسم القناة</label><input id="chName" placeholder="مثال: جاهز، تابي، تمارا"></div>
         <div class="field"><label>النوع</label>

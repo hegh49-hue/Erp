@@ -457,7 +457,7 @@ async function initPosShifts() {
 document.getElementById('shCashierSelect').addEventListener('change', refreshShiftsView);
 async function refreshShiftsView() {
   const cashierId = document.getElementById('shCashierSelect').value;
-  if (!cashierId) { document.getElementById('shCurrentShift').innerHTML = '<div class="empty-note">أضف كاشيراً أولاً من نقطة البيع</div>'; document.getElementById('shHistoryList').innerHTML = ''; return; }
+  if (!cashierId) { document.getElementById('shCurrentShift').innerHTML = '<div class="empty-note">أضف كاشيراً أولاً من فاتورة المبيعات</div>'; document.getElementById('shHistoryList').innerHTML = ''; return; }
   await Promise.all([renderCurrentShift(cashierId), renderShiftsHistory(cashierId)]);
 }
 

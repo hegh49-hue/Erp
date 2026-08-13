@@ -119,7 +119,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
           const componentQty = (comp.qty * qty) / bom.outputQty;
           const stock = await issueStock(client, {
             itemId: comp.componentItemId, warehouseId: effectiveWarehouseId, qty: componentQty,
-            moveDate: new Date().toISOString().slice(0, 10), note: `استهلاك وصفة — بيع نقاط البيع`,
+            moveDate: new Date().toISOString().slice(0, 10), note: `استهلاك وصفة — فاتورة مبيعات`,
             refType: 'pos_sale_bom', createdBy: req.user.id,
           });
           lineCost += stock.unitCost * componentQty;
@@ -129,7 +129,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
       } else if (item.is_stock_tracked) {
         const stock = await issueStock(client, {
           itemId: item.id, warehouseId: effectiveWarehouseId, qty, moveDate: new Date().toISOString().slice(0, 10),
-          note: 'بيع نقاط البيع', refType: 'pos_sale', createdBy: req.user.id,
+          note: 'فاتورة مبيعات', refType: 'pos_sale', createdBy: req.user.id,
         });
         unitCost = stock.unitCost;
         cogsTotal += unitCost * qty;
@@ -187,7 +187,7 @@ router.post('/checkout', asyncHandler(async (req, res) => {
 
     const revenueEntry = await postJournalEntry(client, {
       entryDate: businessDate,
-      description: `مبيعات نقاط البيع - فاتورة #${number}`,
+      description: `فاتورة مبيعات #${number}`,
       reference: number,
       sourceType: 'pos_sale',
       createdBy: req.user.id,
