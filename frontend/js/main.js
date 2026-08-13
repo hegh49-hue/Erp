@@ -9,6 +9,32 @@ function showApp() {
   document.getElementById('appShell').style.display = 'flex';
 }
 
+// Which top-level apps and POS sub-tabs each role may open — mirrors the
+// backend's requireRole() gates so the nav never dangles a link that 403s.
+const ROLE_APPS = {
+  admin: ['home', 'accounting', 'pos', 'inventory', 'settings'],
+  accountant: ['home', 'accounting', 'pos'],
+  cashier: ['home', 'pos'],
+};
+const ROLE_POS_SUBTABS = {
+  admin: null, // null = all
+  cashier: ['sell', 'invoices', 'returns', 'shifts', 'disbursements', 'purchase-requests', 'settings'],
+  accountant: ['disbursements'],
+};
+function applyRoleVisibility() {
+  const allowedApps = ROLE_APPS[currentUser.role] || ['home'];
+  document.querySelectorAll('#appNav button').forEach((b) => {
+    b.style.display = allowedApps.includes(b.dataset.app) ? '' : 'none';
+  });
+  document.querySelectorAll('.app-card').forEach((c) => {
+    c.style.display = allowedApps.includes(c.dataset.openApp) ? '' : 'none';
+  });
+  const allowedPosTabs = ROLE_POS_SUBTABS[currentUser.role];
+  document.querySelectorAll('#posSubnav button').forEach((b) => {
+    b.style.display = !allowedPosTabs || allowedPosTabs.includes(b.dataset.possub) ? '' : 'none';
+  });
+}
+
 async function tryResumeSession() {
   if (!Api.token) { showLogin(); return; }
   try {
@@ -16,8 +42,9 @@ async function tryResumeSession() {
     currentUser = user;
     document.getElementById('hdrUserName').textContent = user.fullName;
     showApp();
+    applyRoleVisibility();
     await loadCompanyHeader();
-    openApp('home');
+    openApp(ROLE_APPS[user.role]?.includes('home') ? 'home' : ROLE_APPS[user.role][0]);
   } catch (err) {
     showLogin();
   }
@@ -34,6 +61,7 @@ document.getElementById('loginBtn').onclick = async () => {
     currentUser = user;
     document.getElementById('hdrUserName').textContent = user.fullName;
     showApp();
+    applyRoleVisibility();
     await loadCompanyHeader();
     openApp('home');
   } catch (err) {
@@ -71,8 +99,11 @@ function openApp(appKey) {
     const activeSub = document.querySelector('#view-inventory .subview.active');
     openInventorySub(activeSub ? activeSub.id.replace('inv-', '') : 'warehouses');
   } else if (appKey === 'pos') {
+    const allowedPosTabs = ROLE_POS_SUBTABS[currentUser.role];
+    const defaultTab = allowedPosTabs ? allowedPosTabs[0] : 'sell';
     const activeSub = document.querySelector('#view-pos .possub.active');
-    openPosSub(activeSub ? activeSub.id.replace('pos-', '') : 'sell');
+    const currentTab = activeSub ? activeSub.id.replace('pos-', '') : defaultTab;
+    openPosSub(!allowedPosTabs || allowedPosTabs.includes(currentTab) ? currentTab : defaultTab);
   } else if (appKey === 'settings') {
     renderSettings();
   }
@@ -117,7 +148,10 @@ function openPosSub(subKey) {
   if (subKey === 'invoices') renderPosInvoices();
   if (subKey === 'returns') initPosReturns();
   if (subKey === 'shifts') initPosShifts();
+  if (subKey === 'disbursements') initPosDisbursements();
+  if (subKey === 'purchase-requests') initPosPurchaseRequests();
   if (subKey === 'reports') renderPosReports();
+  if (subKey === 'settings') initPosSettings();
 }
 document.querySelectorAll('#posSubnav button').forEach((btn) => btn.addEventListener('click', () => openPosSub(btn.dataset.possub)));
 

@@ -2,8 +2,10 @@ const express = require('express');
 const { pool, withTransaction } = require('../db/pool');
 const { asyncHandler, ApiError } = require('../middleware/asyncHandler');
 const { postJournalEntry, accountBalance } = require('../services/accounting');
+const { requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+const reviewerOnly = requireRole('admin', 'accountant');
 
 async function getAccountByCode(client, code) {
   const { rows } = await client.query('SELECT * FROM accounts WHERE code = $1', [code]);
@@ -24,7 +26,7 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json(withDue);
 }));
 
-router.post('/', asyncHandler(async (req, res) => {
+router.post('/', reviewerOnly, asyncHandler(async (req, res) => {
   const { name, type, commissionPct, settlementCycle } = req.body;
   if (!name) throw new ApiError(400, 'اسم القناة مطلوب');
   const channelAccount = await getAccountByCode(pool, '1150');
@@ -45,7 +47,7 @@ router.post('/', asyncHandler(async (req, res) => {
   res.status(201).json(rows[0]);
 }));
 
-router.post('/:id/settle', asyncHandler(async (req, res) => {
+router.post('/:id/settle', reviewerOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const result = await withTransaction(async (client) => {
     const channelAccount = await getAccountByCode(client, '1150');

@@ -66,7 +66,10 @@
   <button data-possub="invoices">سجل الفواتير</button>
   <button data-possub="returns">مردودات المبيعات</button>
   <button data-possub="shifts">شفتات الكاشير</button>
+  <button data-possub="disbursements">طلبات الصرف النقدي</button>
+  <button data-possub="purchase-requests">طلبات الشراء</button>
   <button data-possub="reports">التقارير</button>
+  <button data-possub="settings">الإعدادات</button>
 </div>
 
 <main>
@@ -190,7 +193,7 @@
     </div>
 
     <div class="subview" id="view-trial" style="display:none; padding:22px 26px;">
-      <div class="panel-header"><h2>ميزان المراجعة</h2></div>
+      <div class="panel-header"><h2>ميزان المراجعة</h2><div id="trialExportBtns" style="display:flex; gap:8px;"></div></div>
       <div class="form-card" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
         <div class="field" style="margin-bottom:0;"><label>حتى تاريخ</label><input type="date" id="trialAsOf"></div>
       </div>
@@ -198,7 +201,7 @@
     </div>
 
     <div class="subview" id="view-statements" style="display:none; padding:22px 26px;">
-      <div class="panel-header"><h2>القوائم المالية</h2></div>
+      <div class="panel-header"><h2>القوائم المالية</h2><div id="fsExportBtns" style="display:flex; gap:8px;"></div></div>
       <div class="subtabs">
         <button class="subtab-btn active" data-fs="income">قائمة الدخل</button>
         <button class="subtab-btn" data-fs="balance">المركز المالي</button>
@@ -353,6 +356,15 @@
               <option value="انستقرام">إنستقرام</option><option value="سناب شات">سناب شات</option><option value="تطبيق توصيل">تطبيق توصيل خارجي</option>
             </select>
           </div>
+          <div class="field" style="margin-bottom:0; margin-top:8px;">
+            <label>العميل (اختياري — لربط الفاتورة ببرنامج الولاء أو البيع الآجل)</label>
+            <div style="display:flex; gap:6px;">
+              <input id="posCustomerSearch" placeholder="ابحث بالجوال أو الاسم" style="flex:1;">
+              <button class="btn btn-outline btn-sm" id="posCustomerSearchBtn">بحث</button>
+            </div>
+            <div id="posCustomerResults"></div>
+            <div id="posCustomerSelected" style="display:none;"></div>
+          </div>
         </div>
         <div id="posCartList" style="flex:1; overflow-y:auto; padding:8px 14px;"></div>
         <div style="padding:14px 16px; border-top:1px solid var(--line); background:var(--panel);">
@@ -398,7 +410,7 @@
     </div>
 
     <div class="possub" id="pos-reports" style="display:none; padding:22px 26px;">
-      <div class="panel-header"><h2>تقارير المبيعات</h2></div>
+      <div class="panel-header"><h2>تقارير المبيعات</h2><div id="posRptExportBtns" style="display:flex; gap:8px;"></div></div>
       <div class="subtabs">
         <button class="subtab-btn active" data-posrpt="payment">حسب طريقة الدفع</button>
         <button class="subtab-btn" data-posrpt="items">حسب الأصناف والمجموعات</button>
@@ -416,6 +428,103 @@
         <button class="btn btn-outline" id="rptPrintBtn">طباعة</button>
       </div>
       <div id="rptOutput"></div>
+    </div>
+
+    <div class="possub" id="pos-disbursements" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>طلبات الصرف النقدي</h2></div>
+      <div class="form-card" id="disbCreateCard">
+        <div class="field-row">
+          <div class="field" style="flex:2;"><label>الوصف</label><input id="disbDescription" placeholder="مثال: شراء مستلزمات تنظيف"></div>
+          <div class="field"><label>المبلغ</label><input id="disbAmount" type="number" step="0.01" placeholder="0.00"></div>
+        </div>
+        <div class="field"><label>صورة الإيصال (اختياري)</label><input type="file" id="disbReceiptInput" accept="image/*"></div>
+        <button class="btn btn-blue" id="disbCreateBtn">إرسال طلب الصرف</button>
+        <div id="disbCreateMsg" class="msg" style="display:none;"></div>
+      </div>
+      <h3 style="font-size:14px; margin:20px 0 10px 0;" id="disbListTitle">طلباتي</h3>
+      <div id="disbList"></div>
+    </div>
+
+    <div class="possub" id="pos-purchase-requests" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>طلبات الشراء اليومية</h2></div>
+      <div class="form-card">
+        <div class="field-row">
+          <div class="field" style="flex:2;"><label>الصنف/المادة المطلوبة</label><input id="prDescription" placeholder="مثال: طماطم"></div>
+          <div class="field"><label>الكمية التقريبية</label><input id="prApproxQty" placeholder="مثال: 5 كجم"></div>
+        </div>
+        <div class="field"><label>ملاحظة</label><input id="prNote" placeholder="اختياري"></div>
+        <button class="btn btn-blue" id="prCreateBtn">إرسال الطلب</button>
+        <div id="prCreateMsg" class="msg" style="display:none;"></div>
+      </div>
+      <h3 style="font-size:14px; margin:20px 0 10px 0;">الطلبات</h3>
+      <div class="field" style="max-width:220px;"><label>الحالة</label>
+        <select id="prStatusFilter"><option value="">الكل</option><option value="requested">مطلوب</option><option value="fulfilled">تم التوفير</option><option value="cancelled">ملغى</option></select>
+      </div>
+      <div id="prList"></div>
+    </div>
+
+    <div class="possub" id="pos-settings" style="display:none; padding:22px 26px;">
+      <div class="panel-header"><h2>إعدادات نقاط البيع</h2></div>
+      <div class="subtabs">
+        <button class="subtab-btn active" data-possetting="users">المستخدمون والصلاحيات</button>
+        <button class="subtab-btn" data-possetting="items">الأصناف والوصفات</button>
+        <button class="subtab-btn" data-possetting="customers">العملاء وبرنامج الولاء</button>
+        <button class="subtab-btn" data-possetting="delivery">مندوبو التوصيل</button>
+        <button class="subtab-btn" data-possetting="businessday">يوم العمل</button>
+      </div>
+      <div id="possetting-users" class="possetting-panel">
+        <div class="form-card">
+          <div class="field-row">
+            <div class="field"><label>الاسم الكامل</label><input id="usrFullName"></div>
+            <div class="field"><label>البريد الإلكتروني</label><input id="usrEmail" type="email"></div>
+            <div class="field"><label>كلمة المرور</label><input id="usrPassword" type="password"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>الدور</label>
+              <select id="usrRole">
+                <option value="admin">مدير نظام (كل الصلاحيات)</option>
+                <option value="accountant">محاسب (المحاسبة والتقارير فقط)</option>
+                <option value="cashier">كاشير (نقطة البيع وشفته فقط)</option>
+              </select>
+            </div>
+            <div class="field" id="usrCashierNameWrap"><label>اسم صندوقه</label><input id="usrCashierName" placeholder="مثال: صندوق الكاشير الجديد"></div>
+          </div>
+          <button class="btn btn-blue" id="usrCreateBtn">إضافة مستخدم</button>
+          <div id="usrCreateMsg" class="msg" style="display:none;"></div>
+        </div>
+        <table><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الصندوق</th><th>مفعّل؟</th><th></th></tr></thead><tbody id="usrTableBody"></tbody></table>
+      </div>
+      <div id="possetting-items" class="possetting-panel" style="display:none;">
+        <div class="stub-wrap" style="margin:20px 0;">
+          <div class="stub-icon">🍔</div>
+          <h3>الأصناف ووصفات التصنيع (BOM)</h3>
+          <p>تُدار الأصناف (تصنيفها، أسعارها، صنفها الخدمي/السلعي) ووصفات التصنيع من وحدة المخزون — نفس الشاشة التي يعتمد عليها خصم المكوّنات تلقائياً عند البيع.</p>
+          <button class="btn btn-blue" id="possettingsGoToItemsBtn">فتح شاشة الأصناف بالمخزون</button>
+          <button class="btn btn-outline" id="possettingsGoToBomBtn" style="margin-top:8px;">فتح شاشة وصفات BOM</button>
+        </div>
+      </div>
+      <div id="possetting-customers" class="possetting-panel" style="display:none;">
+        <div class="form-card" style="max-width:420px;">
+          <label style="display:block; font-size:13px; font-weight:800; margin-bottom:10px;">إعدادات برنامج الولاء</label>
+          <div class="field-row">
+            <div class="field"><label>ريال لكل نقطة</label><input id="loyRiyalPerPoint" type="number" step="0.5"></div>
+            <div class="field"><label>قيمة النقطة عند الاستبدال (ريال)</label><input id="loyPointValue" type="number" step="0.01"></div>
+          </div>
+          <button class="btn btn-outline" id="loySaveBtn">حفظ إعدادات الولاء</button>
+          <div id="loyMsg" class="msg" style="display:none;"></div>
+        </div>
+        <div id="custPanel" data-default-type="regular"></div>
+      </div>
+      <div id="possetting-delivery" class="possetting-panel" style="display:none;">
+        <div id="riderPanel" data-default-type="delivery_rider"></div>
+      </div>
+      <div id="possetting-businessday" class="possetting-panel" style="display:none;">
+        <div class="form-card" style="max-width:420px;">
+          <div class="field"><label>وقت بداية يوم العمل</label><select id="possettingBizDayHour"></select></div>
+          <button class="btn btn-outline" id="possettingBizDaySaveBtn">حفظ</button>
+          <div id="possettingBizDayMsg" class="msg" style="display:none;"></div>
+        </div>
+      </div>
     </div>
   </div><!-- /view-pos -->
 
@@ -504,10 +613,15 @@
 </div><!-- /appShell -->
 
 <script src="js/api.js"></script>
+<script src="js/export.js"></script>
 <script src="js/accounting.js"></script>
 <script src="js/inventory.js"></script>
+<script src="js/customers.js"></script>
 <script src="js/pos.js"></script>
 <script src="js/settings.js"></script>
+<script src="js/disbursements.js"></script>
+<script src="js/purchaseRequests.js"></script>
+<script src="js/posSettings.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

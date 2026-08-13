@@ -16,11 +16,11 @@ router.post('/login', asyncHandler(async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) throw new ApiError(401, 'بيانات الدخول غير صحيحة');
   const token = jwt.sign(
-    { id: user.id, email: user.email, fullName: user.full_name, role: user.role },
+    { id: user.id, email: user.email, fullName: user.full_name, role: user.role, cashierEntityId: user.cashier_entity_id },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '12h' }
   );
-  res.json({ token, user: { id: user.id, email: user.email, fullName: user.full_name, role: user.role } });
+  res.json({ token, user: { id: user.id, email: user.email, fullName: user.full_name, role: user.role, cashierEntityId: user.cashier_entity_id } });
 }));
 
 router.get('/me', requireAuth, (req, res) => res.json({ user: req.user }));

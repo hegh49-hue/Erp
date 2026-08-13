@@ -3,8 +3,10 @@ const { pool, withTransaction } = require('../db/pool');
 const { asyncHandler, ApiError } = require('../middleware/asyncHandler');
 const { postJournalEntry, accountBalance } = require('../services/accounting');
 const { getAccountByCode, getInventoryControlAccount, getStockBalance, upsertStockBalance, receiveStock, issueStock } = require('../services/inventory');
+const { requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+const adminOnly = requireRole('admin');
 
 // ---------- Warehouses (analytical elements under account 1200) ----------
 router.get('/warehouses', asyncHandler(async (req, res) => {
@@ -23,7 +25,7 @@ router.get('/warehouses', asyncHandler(async (req, res) => {
   res.json(withBalance);
 }));
 
-router.post('/warehouses', asyncHandler(async (req, res) => {
+router.post('/warehouses', adminOnly, asyncHandler(async (req, res) => {
   const { name, code } = req.body;
   if (!name) throw new ApiError(400, 'اسم المستودع مطلوب');
   const invAccount = await getInventoryControlAccount(pool);
@@ -62,7 +64,7 @@ router.get('/items', asyncHandler(async (req, res) => {
   }));
 }));
 
-router.post('/items', asyncHandler(async (req, res) => {
+router.post('/items', adminOnly, asyncHandler(async (req, res) => {
   const { sku, name, category, nature, itemType, unit, price, taxable, isSellable, isStockTracked, reorderPoint } = req.body;
   if (!name) throw new ApiError(400, 'اسم الصنف مطلوب');
   const finalNature = nature === 'service' ? 'service' : 'goods';
@@ -81,7 +83,7 @@ router.post('/items', asyncHandler(async (req, res) => {
   }
 }));
 
-router.put('/items/:id', asyncHandler(async (req, res) => {
+router.put('/items/:id', adminOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { name, category, nature, itemType, unit, price, taxable, isSellable, isStockTracked, reorderPoint } = req.body;
   const finalNature = nature === 'service' ? 'service' : 'goods';
@@ -96,7 +98,7 @@ router.put('/items/:id', asyncHandler(async (req, res) => {
 }));
 
 // ---------- Manual receipt (opening balance / stock intake before a Purchases module exists) ----------
-router.post('/items/:id/receive', asyncHandler(async (req, res) => {
+router.post('/items/:id/receive', adminOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { warehouseId, qty, unitCost, date, note } = req.body;
   if (!warehouseId) throw new ApiError(400, 'المستودع مطلوب');
@@ -132,7 +134,7 @@ router.post('/items/:id/receive', asyncHandler(async (req, res) => {
 }));
 
 // ---------- Manual adjustment (+/-) e.g. damage, shrinkage found outside a formal count ----------
-router.post('/items/:id/adjust', asyncHandler(async (req, res) => {
+router.post('/items/:id/adjust', adminOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { warehouseId, qty, date, note } = req.body;
   const delta = Number(qty);
@@ -205,7 +207,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   res.json(transfers.map((t) => ({ ...t, lines: byTransfer.get(t.id) || [] })));
 }));
 
-router.post('/transfers', asyncHandler(async (req, res) => {
+router.post('/transfers', adminOnly, asyncHandler(async (req, res) => {
   const { fromWarehouseId, toWarehouseId, date, note, lines } = req.body;
   if (!fromWarehouseId || !toWarehouseId) throw new ApiError(400, 'المستودع المصدر والوجهة مطلوبان');
   if (fromWarehouseId === toWarehouseId) throw new ApiError(400, 'لا يمكن التحويل لنفس المستودع');
@@ -284,7 +286,7 @@ router.get('/counts/:id', asyncHandler(async (req, res) => {
   res.json({ ...countRows[0], lines });
 }));
 
-router.post('/counts', asyncHandler(async (req, res) => {
+router.post('/counts', adminOnly, asyncHandler(async (req, res) => {
   const { warehouseId, date, note } = req.body;
   if (!warehouseId) throw new ApiError(400, 'المستودع مطلوب');
   const result = await withTransaction(async (client) => {
@@ -310,7 +312,7 @@ router.post('/counts', asyncHandler(async (req, res) => {
   res.status(201).json(result);
 }));
 
-router.put('/counts/:id/lines', asyncHandler(async (req, res) => {
+router.put('/counts/:id/lines', adminOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { lines } = req.body;
   const { rows: countRows } = await pool.query('SELECT status FROM stock_counts WHERE id = $1', [id]);
@@ -325,7 +327,7 @@ router.put('/counts/:id/lines', asyncHandler(async (req, res) => {
   res.status(204).end();
 }));
 
-router.post('/counts/:id/post', asyncHandler(async (req, res) => {
+router.post('/counts/:id/post', adminOnly, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const result = await withTransaction(async (client) => {
     const { rows: countRows } = await client.query('SELECT * FROM stock_counts WHERE id = $1 FOR UPDATE', [id]);
@@ -396,7 +398,7 @@ router.get('/boms', asyncHandler(async (req, res) => {
   res.json(boms.map((b) => ({ ...b, lines: byBom.get(b.id) || [] })));
 }));
 
-router.post('/boms', asyncHandler(async (req, res) => {
+router.post('/boms', adminOnly, asyncHandler(async (req, res) => {
   const { outputItemId, name, outputQty, lines } = req.body;
   if (!outputItemId) throw new ApiError(400, 'الصنف الناتج مطلوب');
   if (!Array.isArray(lines) || lines.length === 0) throw new ApiError(400, 'أضف مكوّناً واحداً على الأقل للوصفة');
@@ -427,7 +429,7 @@ router.post('/boms', asyncHandler(async (req, res) => {
   res.status(201).json(result);
 }));
 
-router.delete('/boms/:id', asyncHandler(async (req, res) => {
+router.delete('/boms/:id', adminOnly, asyncHandler(async (req, res) => {
   await pool.query('UPDATE boms SET is_active = false WHERE id = $1', [req.params.id]);
   res.status(204).end();
 }));

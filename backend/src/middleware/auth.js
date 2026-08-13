@@ -12,4 +12,17 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { requireAuth };
+/**
+ * Role gate. admin=everything, accountant=accounting+reports only,
+ * cashier=POS+their own shift only. Use after requireAuth.
+ */
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'لا تملك صلاحية الوصول لهذه الشاشة' });
+    }
+    next();
+  };
+}
+
+module.exports = { requireAuth, requireRole };

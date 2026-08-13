@@ -254,6 +254,11 @@ async function renderTrialBalance() {
     <tbody>${rows}</tbody>
     <tfoot><tr class="total-row"><td colspan="2">الإجمالي</td><td class="mono">${money(data.totalDebit)}</td><td class="mono">${money(data.totalCredit)}</td></tr></tfoot></table>
     <div class="balance-flag ${data.balanced ? 'ok' : 'bad'}">${data.balanced ? '✓ الميزان متوازن' : '⚠ الميزان غير متوازن'}</div>`;
+  renderExportButtons('trialExportBtns', () => ({
+    title: 'ميزان المراجعة', subtitle: `حتى تاريخ ${asOf}`,
+    columns: [{ key: 'code', label: 'الرقم' }, { key: 'name', label: 'اسم الحساب' }, { key: 'debit', label: 'مدين' }, { key: 'credit', label: 'دائن' }],
+    rows: data.rows.map((r) => ({ code: r.code, name: r.name, debit: r.debit.toFixed(2), credit: r.credit.toFixed(2) })),
+  }));
 }
 
 // ---------- Financial statements ----------
@@ -289,6 +294,20 @@ async function renderStatements() {
       <div class="fs-row" style="font-weight:700;"><span>رصيد النقدية الختامي</span><span class="mono">${money(r.closing)}</span></div>
     </div>
     <div class="balance-flag ${checkOk ? 'ok' : 'bad'}" style="max-width:520px;">${checkOk ? '✓ التغير في النقدية يطابق حركة حسابي النقدية والبنك فعلياً' : '⚠ فرق بسيط — راجع تصنيف الحسابات'}</div>`;
+    renderExportButtons('fsExportBtns', () => ({
+      title: 'قائمة التدفقات النقدية', subtitle: `من ${from} إلى ${to}`,
+      columns: [{ key: 'section', label: 'القسم' }, { key: 'name', label: 'البند' }, { key: 'amount', label: 'المبلغ' }],
+      rows: [
+        ...r.cfoRows.map((x) => ({ section: 'تشغيلية', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'تشغيلية', name: 'صافي التدفق التشغيلي', amount: r.cfoTotal.toFixed(2) },
+        ...r.cfiRows.map((x) => ({ section: 'استثمارية', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'استثمارية', name: 'صافي التدفق الاستثماري', amount: r.cfiTotal.toFixed(2) },
+        ...r.cffRows.map((x) => ({ section: 'تمويلية', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'تمويلية', name: 'صافي التدفق التمويلي', amount: r.cffTotal.toFixed(2) },
+        { section: 'الإجمالي', name: 'صافي التغير في النقدية', amount: r.netChange.toFixed(2) },
+        { section: 'الإجمالي', name: 'رصيد النقدية الختامي', amount: r.closing.toFixed(2) },
+      ],
+    }));
     return;
   }
   if (activeFs === 'equity') {
@@ -301,6 +320,12 @@ async function renderStatements() {
       <tbody>${rowsHtml}<tr><td>صافي دخل الفترة الحالية (غير مُقفل بعد)</td><td class="mono">-</td><td class="mono">${money(r.netIncome)}</td><td class="mono">${money(r.netIncome)}</td></tr></tbody>
       <tfoot><tr class="total-row"><td>الإجمالي</td><td class="mono">${money(r.totalOpening)}</td><td class="mono">${money(r.totalClosing - r.totalOpening)}</td><td class="mono">${money(r.totalClosing)}</td></tr></tfoot></table>
     </div>`;
+    renderExportButtons('fsExportBtns', () => ({
+      title: 'قائمة التغيرات في حقوق الملكية', subtitle: `من ${from} إلى ${to}`,
+      columns: [{ key: 'name', label: 'البند' }, { key: 'opening', label: 'رصيد افتتاحي' }, { key: 'movement', label: 'الحركة' }, { key: 'closing', label: 'رصيد ختامي' }],
+      rows: [...r.rows.map((x) => ({ name: x.name, opening: x.opening.toFixed(2), movement: x.movement.toFixed(2), closing: x.closing.toFixed(2) })),
+        { name: 'صافي دخل الفترة الحالية', opening: '-', movement: r.netIncome.toFixed(2), closing: r.netIncome.toFixed(2) }],
+    }));
     return;
   }
   if (activeFs === 'income') {
@@ -316,6 +341,17 @@ async function renderStatements() {
       <div class="fs-row" style="font-weight:700; border-top:1px dashed var(--line); padding-top:6px;"><span>إجمالي المصروفات</span><span class="mono">${money(r.totalExp)}</span></div>
       <div class="fs-row grand"><span>صافي الدخل</span><span class="mono" style="color:${r.netIncome >= 0 ? 'var(--green)' : 'var(--stamp)'};">${money(r.netIncome)}</span></div>
     </div>`;
+    renderExportButtons('fsExportBtns', () => ({
+      title: 'قائمة الدخل', subtitle: `من ${from} إلى ${to}`,
+      columns: [{ key: 'section', label: 'القسم' }, { key: 'name', label: 'البند' }, { key: 'amount', label: 'المبلغ' }],
+      rows: [
+        ...r.revRows.map((x) => ({ section: 'الإيرادات', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'الإيرادات', name: 'إجمالي الإيرادات', amount: r.totalRev.toFixed(2) },
+        ...r.expRows.map((x) => ({ section: 'المصروفات', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'المصروفات', name: 'إجمالي المصروفات', amount: r.totalExp.toFixed(2) },
+        { section: 'الإجمالي', name: 'صافي الدخل', amount: r.netIncome.toFixed(2) },
+      ],
+    }));
   } else {
     const asOf = document.getElementById('balAsOf').value;
     const r = await Api.get(`/reports/balance-sheet?asOf=${asOf}`);
@@ -334,5 +370,18 @@ async function renderStatements() {
       <div class="fs-row grand"><span>إجمالي الالتزامات وحقوق الملكية</span><span class="mono">${money(r.totalLiab + r.totalEquity)}</span></div>
     </div>
     <div class="balance-flag ${r.balanced ? 'ok' : 'bad'}" style="max-width:520px;">${r.balanced ? '✓ الميزانية متوازنة' : '⚠ غير متوازنة — راجع القيود'}</div>`;
+    renderExportButtons('fsExportBtns', () => ({
+      title: 'قائمة المركز المالي', subtitle: `كما في ${asOf}`,
+      columns: [{ key: 'section', label: 'القسم' }, { key: 'name', label: 'البند' }, { key: 'amount', label: 'المبلغ' }],
+      rows: [
+        ...r.assetRows.map((x) => ({ section: 'الأصول', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'الأصول', name: 'إجمالي الأصول', amount: r.totalAssets.toFixed(2) },
+        ...r.liabRows.map((x) => ({ section: 'الالتزامات', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'الالتزامات', name: 'إجمالي الالتزامات', amount: r.totalLiab.toFixed(2) },
+        ...r.eqRows.map((x) => ({ section: 'حقوق الملكية', name: x.name, amount: x.amount.toFixed(2) })),
+        { section: 'حقوق الملكية', name: 'إجمالي حقوق الملكية', amount: r.totalEquity.toFixed(2) },
+        { section: 'الإجمالي', name: 'إجمالي الالتزامات وحقوق الملكية', amount: (r.totalLiab + r.totalEquity).toFixed(2) },
+      ],
+    }));
   }
 }

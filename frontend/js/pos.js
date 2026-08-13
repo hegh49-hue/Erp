@@ -1,8 +1,10 @@
 let posCart = [];
 let posInited = false;
+let posBomOutputItemIds = new Set();
 
 async function initPosSell() {
-  await Promise.all([loadWarehouses(), loadItems(), loadChannelsCache()]);
+  const [, , , boms] = await Promise.all([loadWarehouses(), loadItems(), loadChannelsCache(), Api.get('/inventory/boms')]);
+  posBomOutputItemIds = new Set(boms.map((b) => b.output_item_id));
   await populateCashierSelect();
   populatePosWarehouseSelect();
   populatePosPayMethod();
@@ -38,8 +40,9 @@ function populatePosPayMethod() {
   const sel = document.getElementById('posPayMethod');
   const cur = sel.value;
   let html = '<option value="نقدي">نقدي</option><option value="شبكة">شبكة</option><option value="تحويل">تحويل</option>';
+  html += '<option value="credit_customer">آجل — عميل</option>';
   if (cachedChannels.length > 0) {
-    html += '<optgroup label="قنوات خارجية">' + cachedChannels.map((c) => `<option value="channel:${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.extra?.type || '')})</option>`).join('') + '</optgroup>';
+    html += '<optgroup label="آجل — قنوات خارجية">' + cachedChannels.map((c) => `<option value="channel:${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.extra?.type || '')})</option>`).join('') + '</optgroup>';
   }
   sel.innerHTML = html;
   if (cur) sel.value = cur;
@@ -66,22 +69,24 @@ function renderPosItemsGrid() {
   const list = cachedItems.filter((i) => i.is_sellable && (posActiveCat === 'الكل' || (i.category || 'عام') === posActiveCat));
   if (list.length === 0) { grid.innerHTML = '<div class="empty-note" style="grid-column:1/-1;">لا توجد أصناف قابلة للبيع في هذا التصنيف</div>'; return; }
   list.forEach((item) => {
+    const isBomItem = posBomOutputItemIds.has(item.id);
     const card = document.createElement('div');
     card.className = 'pos-item-card';
-    const availLine = item.is_stock_tracked ? `<div class="pc">متوفر ${item.totalQty}</div>` : `<div class="pc">خدمي</div>`;
+    const availLine = isBomItem ? '<div class="pc">وصفة تصنيع</div>' : (item.is_stock_tracked ? `<div class="pc">متوفر ${item.totalQty}</div>` : '<div class="pc">خدمي</div>');
     card.innerHTML = `<div class="pn">${escapeHtml(item.name)}</div>${availLine}<div class="pp">${money(item.price)}</div>`;
     card.onclick = () => {
-      if (item.is_stock_tracked && item.totalQty <= 0) { alert('الكمية غير متوفرة بالمخزون'); return; }
+      if (!isBomItem && item.is_stock_tracked && item.totalQty <= 0) { alert('الكمية غير متوفرة بالمخزون'); return; }
       addToPosCart(item);
     };
     grid.appendChild(card);
   });
 }
 function addToPosCart(item) {
+  const isBomItem = posBomOutputItemIds.has(item.id);
   const line = posCart.find((c) => c.id === item.id);
   const inCartQty = line ? line.qty : 0;
-  if (item.is_stock_tracked && inCartQty + 1 > item.totalQty) { alert('الكمية المتاحة في المخزون غير كافية'); return; }
-  if (line) line.qty += 1; else posCart.push({ id: item.id, name: item.name, price: Number(item.price), taxable: item.taxable, qty: 1, tracked: item.is_stock_tracked, avail: item.totalQty });
+  if (!isBomItem && item.is_stock_tracked && inCartQty + 1 > item.totalQty) { alert('الكمية المتاحة في المخزون غير كافية'); return; }
+  if (line) line.qty += 1; else posCart.push({ id: item.id, name: item.name, price: Number(item.price), taxable: item.taxable, qty: 1, tracked: item.is_stock_tracked && !isBomItem, isBom: isBomItem, avail: item.totalQty });
   renderPosCart();
 }
 function changePosCartQty(id, delta) {
@@ -122,18 +127,22 @@ function renderPosCart() {
 document.getElementById('posCheckoutBtn').onclick = async () => {
   const cashierId = document.getElementById('posCashierSelect').value;
   const warehouseId = document.getElementById('posWarehouseSelect').value;
-  const requiresWarehouse = posCart.some((c) => c.tracked);
+  const requiresWarehouse = posCart.some((c) => c.tracked || c.isBom);
   if (!cashierId || cashierId === '__new__') { alert('يرجى اختيار الكاشير أولاً'); return; }
   if (requiresWarehouse && !warehouseId) { alert('يرجى اختيار المستودع أولاً — السلة تحتوي أصنافاً سلعية'); return; }
   const payMethodRaw = document.getElementById('posPayMethod').value;
   const payMethodLabel = document.querySelector('#posPayMethod option:checked').textContent;
   const payMethod = payMethodRaw.startsWith('channel:') ? 'channel' : payMethodRaw;
   const payEntityId = payMethodRaw.startsWith('channel:') ? payMethodRaw.replace('channel:', '') : null;
+  if (payMethod === 'credit_customer' && !posSelectedCustomer) { alert('يرجى اختيار العميل للبيع الآجل'); return; }
+  const redeemInput = document.getElementById('posLoyaltyRedeem');
   const body = {
     cashierId, warehouseId, payMethod, payEntityId, payMethodLabel,
     orderType: document.getElementById('posOrderType').value,
     orderSource: document.getElementById('posOrderSource').value,
     items: posCart.map((c) => ({ itemId: c.id, qty: c.qty })),
+    customerId: posSelectedCustomer?.id || null,
+    loyaltyPointsToRedeem: redeemInput ? parseInt(redeemInput.value, 10) || 0 : 0,
   };
   try {
     const invoice = await Api.post('/pos/checkout', body);
@@ -141,6 +150,9 @@ document.getElementById('posCheckoutBtn').onclick = async () => {
     renderPosCart();
     await loadItems();
     renderPosItemsGrid();
+    posSelectedCustomer = null;
+    document.getElementById('posCustomerSelected').style.display = 'none';
+    document.getElementById('posCustomerSelected').innerHTML = '';
     showPosReceipt(invoice, document.querySelector('#posCashierSelect option:checked').textContent);
   } catch (err) { alert(err.message); }
 };
@@ -307,6 +319,11 @@ async function renderPosReports() {
         <div class="stat-card"><div class="label">إجمالي عدد المردودات</div><div class="value mono">${r.grandReturnsCount}</div></div>
         <div class="stat-card"><div class="label">الإجمالي العام (صافي)</div><div class="value mono">${money(r.grandTotal)}</div></div>
       </div>`;
+    renderExportButtons('posRptExportBtns', () => ({
+      title: 'تقرير المبيعات حسب طريقة الدفع', subtitle: `من ${from} إلى ${to}`,
+      columns: [{ key: 'method', label: 'طريقة الدفع' }, { key: 'cashier', label: 'الكاشير' }, { key: 'salesCount', label: 'عدد المبيعات' }, { key: 'returnsCount', label: 'عدد المردودات' }, { key: 'netAmount', label: 'الصافي' }],
+      rows: r.methods.flatMap((m) => m.byCashier.map((c) => ({ method: m.payMethodLabel, cashier: c.cashierName, salesCount: c.salesCount, returnsCount: c.returnsCount, netAmount: c.netAmount.toFixed(2) }))),
+    }));
   } else if (activePosRpt === 'items') {
     const groupBy = document.getElementById('rptGroupBy').value;
     const r = await Api.get(`/reports/pos-sales-by-item?from=${from}&to=${to}&groupBy=${groupBy}`);
@@ -317,6 +334,13 @@ async function renderPosReports() {
       <table><thead><tr><th>${headLabel}</th><th>الكمية المباعة</th><th>الإيراد</th>${groupBy === 'category' ? '<th>النسبة من الإجمالي</th>' : ''}</tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr class="total-row"><td>الإجمالي</td><td class="mono">${r.totalQty}</td><td class="mono">${money(r.totalRevenue)}</td>${groupBy === 'category' ? '<td class="mono">100%</td>' : ''}</tr></tfoot></table>`;
+    renderExportButtons('posRptExportBtns', () => ({
+      title: groupBy === 'category' ? 'المبيعات حسب المجموعة' : 'المبيعات حسب الصنف', subtitle: `من ${from} إلى ${to}`,
+      columns: groupBy === 'category'
+        ? [{ key: 'label', label: 'المجموعة' }, { key: 'qty', label: 'الكمية' }, { key: 'revenue', label: 'الإيراد' }, { key: 'pct', label: 'النسبة%' }]
+        : [{ key: 'label', label: 'الصنف' }, { key: 'qty', label: 'الكمية' }, { key: 'revenue', label: 'الإيراد' }],
+      rows: r.rows.map((row) => ({ label: row.label || 'غير مصنّف', qty: row.qty, revenue: row.revenue.toFixed(2), pct: row.pct?.toFixed(1) })),
+    }));
   } else {
     if (!document.getElementById('rptClosingDate').value) {
       document.getElementById('rptClosingDate').value = currentBusinessDate(companyCache?.business_day_start_hour ?? 6);
@@ -344,6 +368,21 @@ async function renderPosReports() {
         <h3 style="font-size:14px; margin:16px 0 8px 0;">أعلى 5 أصناف مبيعاً</h3>
         <table><thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>الإيراد</th></tr></thead><tbody>${topRows}</tbody></table>
       </div>`;
+    renderExportButtons('posRptExportBtns', () => ({
+      title: 'تقرير إغلاق يوم العمل', subtitle: `يوم العمل ${r.businessDate}`,
+      columns: [{ key: 'section', label: 'القسم' }, { key: 'item', label: 'البند' }, { key: 'value', label: 'القيمة' }],
+      rows: [
+        { section: 'الإجماليات', item: 'قبل الضريبة', value: r.subtotal.toFixed(2) },
+        { section: 'الإجماليات', item: 'الضريبة', value: r.vat.toFixed(2) },
+        { section: 'الإجماليات', item: 'إجمالي المبيعات', value: r.total.toFixed(2) },
+        { section: 'الإجماليات', item: 'عدد الفواتير', value: r.invoiceCount },
+        { section: 'الإجماليات', item: 'عدد المردودات', value: r.returnsCount },
+        { section: 'الإجماليات', item: 'قيمة المردودات', value: r.returnsTotal.toFixed(2) },
+        { section: 'الإجماليات', item: 'صافي المبيعات', value: r.netTotal.toFixed(2) },
+        ...r.byPaymentMethod.map((m) => ({ section: 'طرق الدفع', item: m.payMethodLabel, value: m.netAmount.toFixed(2) })),
+        ...r.topItems.map((it, i) => ({ section: 'أعلى الأصناف', item: `${i + 1}. ${it.name}`, value: `${it.qty} — ${it.revenue.toFixed(2)}` })),
+      ],
+    }));
   }
 }
 document.getElementById('rptClosingDate').addEventListener('change', renderPosReports);
@@ -388,47 +427,106 @@ async function renderCurrentShift(cashierId) {
     };
     return;
   }
+  const denominations = companyCache?.currency_denominations || [500, 200, 100, 50, 20, 10, 5, 1, 0.5, 0.25];
+  const disb = shift.live.disbursements || [];
+  const disbHtml = disb.length
+    ? `<table style="margin-top:10px;"><thead><tr><th>الوصف</th><th>المبلغ</th><th>المرفق</th></tr></thead><tbody>
+        ${disb.map((d) => `<tr><td>${escapeHtml(d.description)}</td><td class="mono">${money(d.amount)}</td><td>${d.receipt_attachment ? `<a href="${d.receipt_attachment}" target="_blank">عرض</a>` : '-'}</td></tr>`).join('')}
+       </tbody></table>`
+    : '<div class="empty-note">لا توجد مصروفات معتمدة خلال هذا الشفت</div>';
+
   wrap.innerHTML = `
     <div class="form-card">
       <div class="panel-header" style="margin-bottom:10px;"><h2 style="font-size:15px;">شفت مفتوح منذ ${new Date(shift.opened_at).toLocaleString('ar-SA')}</h2><span class="badge">${escapeHtml(shift.cashier_name)}</span></div>
       <div class="stat-cards">
         <div class="stat-card"><div class="label">الرصيد الافتتاحي</div><div class="value mono">${money(shift.opening_float)}</div></div>
-        <div class="stat-card"><div class="label">صافي المبيعات النقدية حتى الآن</div><div class="value mono">${money(shift.liveNetCash)}</div></div>
-        <div class="stat-card"><div class="label">الرصيد المتوقع الآن</div><div class="value mono">${money(shift.liveExpectedAmount)}</div></div>
+        <div class="stat-card"><div class="label">صافي المبيعات النقدية</div><div class="value mono">${money(shift.live.netCashSales)}</div></div>
+        <div class="stat-card"><div class="label">مصروفات معتمدة خلال الشفت</div><div class="value mono">${money(shift.live.disbursementsTotal)}</div></div>
+        <div class="stat-card"><div class="label">الرصيد النقدي المتوقع الآن</div><div class="value mono">${money(shift.live.cashExpected)}</div></div>
+        <div class="stat-card"><div class="label">صافي مبيعات الشبكة (متوقع)</div><div class="value mono">${money(shift.live.networkExpected)}</div></div>
       </div>
-      <div class="field"><label>المبلغ الفعلي المعدود (لإغلاق الشفت)</label><input id="shCountedAmount" type="number" step="0.01" placeholder="0.00"></div>
+      <h3 style="font-size:13px; margin:14px 0 8px 0;">مصروفات نقدية معتمدة خلال الشفت</h3>
+      ${disbHtml}
+      <h3 style="font-size:13px; margin:14px 0 8px 0;">عدّ النقدية حسب الفئة</h3>
+      <div id="shDenomRows"></div>
+      <div class="lines-total"><span>إجمالي المعدود نقداً</span><span class="mono" id="shDenomSum">0.00</span></div>
+      <div class="field" style="margin-top:10px;"><label>مبلغ الشبكة الفعلي (من كشف جهاز الشبكة)</label><input id="shNetworkCounted" type="number" step="0.01" placeholder="0.00"></div>
       <div class="field"><label>ملاحظة</label><input id="shCloseNote" placeholder="اختياري"></div>
       <button class="btn btn-primary" id="shCloseBtn" style="width:100%;">إغلاق الشفت</button>
       <div id="shCloseMsg" class="msg" style="display:none;"></div>
     </div>`;
+
+  const denomRows = document.getElementById('shDenomRows');
+  denomRows.innerHTML = denominations.map((v) => `
+    <div class="line-row">
+      <span style="flex:1;">فئة ${v} ر.س</span>
+      <input class="denom-qty-input mono" data-value="${v}" type="number" min="0" step="1" value="0" style="flex:1;">
+      <span class="mono denom-line-total" style="flex:1;">0.00</span>
+    </div>`).join('');
+  function updateDenomSum() {
+    let sum = 0;
+    denomRows.querySelectorAll('.denom-qty-input').forEach((inp) => {
+      const value = Number(inp.dataset.value);
+      const qty = Number(inp.value) || 0;
+      const lineTotal = value * qty;
+      sum += lineTotal;
+      inp.closest('.line-row').querySelector('.denom-line-total').textContent = lineTotal.toFixed(2);
+    });
+    document.getElementById('shDenomSum').textContent = sum.toFixed(2);
+    return sum;
+  }
+  denomRows.querySelectorAll('.denom-qty-input').forEach((inp) => inp.addEventListener('input', updateDenomSum));
+  updateDenomSum();
+
   document.getElementById('shCloseBtn').onclick = async () => {
-    const countedAmount = document.getElementById('shCountedAmount').value;
+    const denomValues = {};
+    denomRows.querySelectorAll('.denom-qty-input').forEach((inp) => { denomValues[inp.dataset.value] = Number(inp.value) || 0; });
+    const networkCounted = document.getElementById('shNetworkCounted').value;
     const note = document.getElementById('shCloseNote').value.trim();
     const msg = document.getElementById('shCloseMsg');
-    if (countedAmount === '') { alert('أدخل المبلغ الفعلي المعدود'); return; }
+    if (networkCounted === '') { alert('أدخل مبلغ الشبكة الفعلي'); return; }
     if (!confirm('إغلاق الشفت نهائي ولا يمكن التراجع عنه. متابعة؟')) return;
     try {
-      const closed = await Api.post(`/pos/shifts/${shift.id}/close`, { countedAmount: parseFloat(countedAmount), note });
+      const closed = await Api.post(`/pos/shifts/${shift.id}/close`, { denominations: denomValues, networkCounted: parseFloat(networkCounted), note });
       renderShiftReport(closed);
       refreshShiftsView();
     } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; msg.style.display = 'block'; }
   };
 }
 
+function varianceColorOf(v) { return Number(v) === 0 ? 'var(--green)' : (Number(v) > 0 ? 'var(--blue)' : 'var(--stamp)'); }
+function varianceLabelOf(v) { return Number(v) === 0 ? 'مطابق تماماً' : (Number(v) > 0 ? 'زيادة' : 'عجز'); }
+
 function renderShiftReport(shift) {
-  const varianceColor = Number(shift.variance) === 0 ? 'var(--green)' : (Number(shift.variance) > 0 ? 'var(--blue)' : 'var(--stamp)');
-  const varianceLabel = Number(shift.variance) === 0 ? 'مطابق تماماً' : (Number(shift.variance) > 0 ? 'زيادة' : 'عجز');
+  const denominations = shift.denominations || {};
+  const denomRowsHtml = Object.entries(denominations).filter(([, qty]) => Number(qty) > 0)
+    .map(([value, qty]) => `<tr><td>فئة ${value} ر.س</td><td class="mono">${qty}</td><td class="mono">${(Number(value) * Number(qty)).toFixed(2)}</td></tr>`).join('')
+    || '<tr><td colspan="3" class="empty-note">لا يوجد تفصيل فئات</td></tr>';
+  const disb = shift.disbursementsList || [];
+  const disbRowsHtml = disb.length
+    ? disb.map((d) => `<tr><td>${escapeHtml(d.description)}</td><td class="mono">${money(d.amount)}</td><td>${d.receipt_attachment ? `<a href="${d.receipt_attachment}" target="_blank">عرض</a>` : '-'}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="empty-note">لا توجد مصروفات معتمدة خلال هذا الشفت</td></tr>';
   const html = `
     <div class="printable-report">
       <h3 style="margin:0 0 4px 0;">تقرير تصفية شفت — ${escapeHtml(shift.cashier_name)}</h3>
       <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">من ${new Date(shift.opened_at).toLocaleString('ar-SA')} إلى ${new Date(shift.closed_at).toLocaleString('ar-SA')}</div>
+      <h3 style="font-size:13px; margin:10px 0 6px 0;">النقدية</h3>
       <div class="stat-cards">
         <div class="stat-card"><div class="label">الرصيد الافتتاحي</div><div class="value mono">${money(shift.opening_float)}</div></div>
-        <div class="stat-card"><div class="label">الرصيد المتوقع</div><div class="value mono">${money(shift.expected_amount)}</div></div>
-        <div class="stat-card"><div class="label">المبلغ الفعلي المعدود</div><div class="value mono">${money(shift.counted_amount)}</div></div>
-        <div class="stat-card"><div class="label">الفرق</div><div class="value mono" style="color:${varianceColor};">${money(shift.variance)} (${varianceLabel})</div></div>
+        <div class="stat-card"><div class="label">الرصيد النقدي المتوقع</div><div class="value mono">${money(shift.expected_amount)}</div></div>
+        <div class="stat-card"><div class="label">المعدود فعلياً</div><div class="value mono">${money(shift.counted_amount)}</div></div>
+        <div class="stat-card"><div class="label">فرق النقدية</div><div class="value mono" style="color:${varianceColorOf(shift.variance)};">${money(shift.variance)} (${varianceLabelOf(shift.variance)})</div></div>
       </div>
-      ${shift.note ? `<div style="font-size:12.5px; color:var(--muted);">ملاحظة: ${escapeHtml(shift.note)}</div>` : ''}
+      <table><thead><tr><th>الفئة</th><th>العدد</th><th>الإجمالي</th></tr></thead><tbody>${denomRowsHtml}</tbody></table>
+      <h3 style="font-size:13px; margin:14px 0 6px 0;">الشبكة</h3>
+      <div class="stat-cards">
+        <div class="stat-card"><div class="label">المتوقع من النظام</div><div class="value mono">${money(shift.network_expected)}</div></div>
+        <div class="stat-card"><div class="label">الفعلي من كشف الجهاز</div><div class="value mono">${money(shift.network_counted)}</div></div>
+        <div class="stat-card"><div class="label">فرق الشبكة</div><div class="value mono" style="color:${varianceColorOf(shift.network_variance)};">${money(shift.network_variance)} (${varianceLabelOf(shift.network_variance)})</div></div>
+      </div>
+      <h3 style="font-size:13px; margin:14px 0 6px 0;">مصروفات نقدية معتمدة خلال الشفت (إجمالي ${money(shift.disbursements_total)})</h3>
+      <table><thead><tr><th>الوصف</th><th>المبلغ</th><th>المرفق</th></tr></thead><tbody>${disbRowsHtml}</tbody></table>
+      ${shift.note ? `<div style="font-size:12.5px; color:var(--muted); margin-top:10px;">ملاحظة: ${escapeHtml(shift.note)}</div>` : ''}
     </div>
     <button class="btn btn-outline" id="shReportPrintBtn" style="margin-top:10px;">طباعة</button>`;
   document.getElementById('countModalContent').innerHTML = html;
@@ -444,13 +542,15 @@ async function renderShiftsHistory(cashierId) {
   if (closed.length === 0) { wrap.innerHTML = '<div class="empty-note">لا توجد شفتات مغلقة بعد</div>'; return; }
   wrap.innerHTML = '';
   closed.forEach((s) => {
-    const varianceColor = Number(s.variance) === 0 ? 'var(--green)' : (Number(s.variance) > 0 ? 'var(--blue)' : 'var(--stamp)');
     const card = document.createElement('div');
     card.className = 'entry-card';
     card.innerHTML = `<div class="entry-head">
       <div class="eh-left"><span class="eh-date">${new Date(s.opened_at).toLocaleString('ar-SA')}</span><span class="eh-desc">إلى ${new Date(s.closed_at).toLocaleString('ar-SA')}</span></div>
-      <span class="eh-total mono" style="color:${varianceColor};">${money(s.variance)}</span></div>`;
-    card.querySelector('.entry-head').onclick = () => renderShiftReport(s);
+      <span class="eh-total mono" style="color:${varianceColorOf(s.variance)};">${money(s.variance)}</span></div>`;
+    card.querySelector('.entry-head').onclick = async () => {
+      const detail = await Api.get('/pos/shifts/' + s.id);
+      renderShiftReport(detail);
+    };
     wrap.appendChild(card);
   });
 }
